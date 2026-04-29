@@ -316,39 +316,44 @@ router.get('/projecao', (req, res) => {
   }
 })
 
-// ── Análise de imagem / PDF com IA ──
-router.post('/analisar-arquivo', upload.single('arquivo'), async (req, res) => {
+// ── Análise de múltiplos arquivos (até 6) com IA ──
+router.post('/analisar-arquivo', upload.array('arquivos', 6), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
-    const { mimetype, buffer } = req.file
+    const arquivos = req.files || []
+    if (!arquivos.length) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
     const tipos = ['image/jpeg','image/png','image/webp','image/gif','application/pdf']
-    if (!tipos.includes(mimetype)) return res.status(400).json({ erro: 'Formato não suportado. Use JPG, PNG, WebP ou PDF.' })
-    const base64 = buffer.toString('base64')
-    const resultado = await analisarArquivoFinanceiro(base64, mimetype)
-    res.json(resultado)
+    for (const f of arquivos) {
+      if (!tipos.includes(f.mimetype)) return res.status(400).json({ erro: `Formato não suportado: ${f.originalname}. Use JPG, PNG, WebP ou PDF.` })
+    }
+    // Processa todos em paralelo
+    const resultados = await Promise.all(
+      arquivos.map(f => analisarArquivoFinanceiro(f.buffer.toString('base64'), f.mimetype, f.originalname))
+    )
+    res.json({ resultados, total: resultados.length })
   } catch (e) {
     console.error('POST /analisar-arquivo erro:', e.message)
     res.status(500).json({ erro: e.message })
   }
 })
 
-// ── Aplicar resultado da análise no banco ──
+// ── Aplicar resultado da análise no banco (com verificação de duplicatas) ──
 router.post('/aplicar-analise', (req, res) => {
   try {
     const { usuarioId, analise, cartaoId, contaId } = req.body
     if (!usuarioId || !analise) return res.status(400).json({ erro: 'Dados incompletos' })
 
-    const resultado = { aplicados: 0, tipo: analise.tipo }
+    const resultado = { aplicados: 0, duplicatas: 0, tipo: analise.tipo }
 
     if (analise.tipo === 'extrato') {
-      // Atualiza saldo da conta se informada
       if (contaId && analise.saldo != null) {
         db.atualizarSaldoConta(contaId, analise.saldo)
         resultado.saldoAtualizado = analise.saldo
       }
-      // Importa transações como gastos/receitas
       for (const tx of (analise.transacoes || [])) {
         if (!tx.valor) continue
+        if (db.verificarDuplicataGasto(usuarioId, tx.descricao, tx.valor, tx.data)) {
+          resultado.duplicatas++; continue
+        }
         if (tx.tipo_tx === 'credito') {
           db.registrarReceita(usuarioId, tx.valor, tx.descricao, tx.data)
         } else {
@@ -356,21 +361,27 @@ router.post('/aplicar-analise', (req, res) => {
         }
         resultado.aplicados++
       }
+      const banco = analise.banco || 'Extrato'
+      db.registrarImportacao(usuarioId, 'imagem_extrato', banco, resultado.aplicados, resultado.duplicatas)
     }
 
     if (analise.tipo === 'fatura_cartao') {
-      // Atualiza gasto_atual do cartão com total da fatura
       if (cartaoId && analise.valor_total) {
         db.atualizarFaturaCartao(cartaoId, analise.valor_total)
         resultado.faturaAtualizada = analise.valor_total
       }
-      // Importa itens como gastos parcelados
       for (const item of (analise.itens || [])) {
         if (!item.valor) continue
         const parcelas = item.total_parcelas || 1
-        db.registrarGasto(usuarioId, item.descricao, item.valor * parcelas, item.categoria || 'Outros', 'crédito', cartaoId || null, parcelas, null)
+        const valorTotal = item.valor * parcelas
+        if (db.verificarDuplicataGasto(usuarioId, item.descricao, item.valor, item.data)) {
+          resultado.duplicatas++; continue
+        }
+        db.registrarGasto(usuarioId, item.descricao, valorTotal, item.categoria || 'Outros', 'crédito', cartaoId || null, parcelas, null)
         resultado.aplicados++
       }
+      const banco = analise.banco || 'Fatura'
+      db.registrarImportacao(usuarioId, 'imagem_fatura', banco, resultado.aplicados, resultado.duplicatas)
     }
 
     res.json(resultado)
@@ -396,25 +407,29 @@ router.post('/importar-csv', upload.single('arquivo'), (req, res) => {
   }
 })
 
-// ── Confirmar importação CSV ──
+// ── Confirmar importação CSV (com verificação de duplicatas) ──
 router.post('/importar-csv/confirmar', (req, res) => {
   try {
     const { usuarioId, registros } = req.body
     if (!usuarioId || !registros?.length) return res.status(400).json({ erro: 'Dados incompletos' })
 
-    let gastos = 0, receitas = 0
+    let gastos = 0, receitas = 0, duplicatas = 0
     for (const r of registros) {
       if (!r.valor) continue
       if (r.tipo === 'receita') {
         db.registrarReceita(usuarioId, r.valor, r.descricao, r.data)
         receitas++
       } else {
+        if (db.verificarDuplicataGasto(usuarioId, r.descricao, r.valor, r.data)) {
+          duplicatas++; continue
+        }
         const cat = mapearCategoriaCSV(r.categoria)
         db.registrarGasto(usuarioId, r.descricao, r.valor, cat, 'pix', null, 1, null)
         gastos++
       }
     }
-    res.json({ ok: true, gastos, receitas, total: gastos + receitas })
+    db.registrarImportacao(usuarioId, 'csv', `CSV — ${registros.length} registros`, gastos + receitas, duplicatas)
+    res.json({ ok: true, gastos, receitas, duplicatas, total: gastos + receitas })
   } catch (e) {
     console.error('POST /importar-csv/confirmar erro:', e.message)
     res.status(500).json({ erro: e.message })
@@ -434,6 +449,51 @@ function mapearCategoriaCSV(cat) {
   if (/assinatura|netflix|spotify|amazon/.test(c)) return 'Assinatura'
   return 'Outros'
 }
+
+// Histórico de importações
+router.get('/importacoes', (req, res) => {
+  const { usuarioId } = req.query
+  res.json(db.listarImportacoes(usuarioId ? parseInt(usuarioId) : null))
+})
+
+// Exportar CSV do mês
+router.get('/exportar/csv', (req, res) => {
+  try {
+    const { mes, ano } = req.query
+    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
+    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
+
+    const linhas = ['Data;Descrição;Categoria;Valor;Tipo;Pessoa;Cartão;Forma Pagamento']
+    for (const r of receitas) {
+      linhas.push(`${r.data_receita};${r.descricao};Receita;${Number(r.valor).toFixed(2)};Receita;${r.usuario_nome};;`)
+    }
+    for (const g of gastos) {
+      linhas.push(`${g.data_gasto};${g.descricao};${g.categoria};${Number(g.valor).toFixed(2)};Despesa;${g.usuario_nome};${g.cartao_nome||''};${g.forma_pagamento||''}`)
+    }
+
+    const now = new Date()
+    const nomeMes = String(mes || now.getMonth() + 1).padStart(2, '0')
+    const nomeAno = ano || now.getFullYear()
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="financas-${nomeAno}-${nomeMes}.csv"`)
+    res.send('﻿' + linhas.join('\r\n')) // BOM para Excel pt-BR
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+// Dados para relatório HTML (exportação visual)
+router.get('/exportar/dados', (req, res) => {
+  try {
+    const { mes, ano } = req.query
+    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
+    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
+    const resumo = db.resumoFinanceiro()
+    res.json({ gastos, receitas, resumo })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
 
 router.get('/plano', async (req, res) => {
   const resumo = db.resumoFinanceiro()

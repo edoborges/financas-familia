@@ -158,13 +158,13 @@ Seja direto, use números reais e emojis. Máximo 500 palavras.`
   return response.content[0].text
 }
 
-async function analisarArquivoFinanceiro(base64Data, mediaType) {
+async function analisarArquivoFinanceiro(base64Data, mediaType, nomeArquivo = '') {
   const isPDF = mediaType === 'application/pdf'
   const contentBlock = isPDF
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } }
 
-  const prompt = `Analise este documento financeiro brasileiro e extraia as informações com precisão.
+  const prompt = `Analise este documento financeiro brasileiro${nomeArquivo ? ` (arquivo: ${nomeArquivo})` : ''} e extraia as informações com precisão.
 Retorne APENAS um JSON válido, sem texto antes ou depois.
 
 Se for um EXTRATO BANCÁRIO, tela de conta ou saldo:

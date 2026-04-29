@@ -102,6 +102,7 @@
     </div>
     <div class="header-right">
       <button class="btn-notif" onclick="abrirUpload()" title="Importar extrato ou fatura">📸</button>
+      <button class="btn-notif" onclick="abrirMenuFerramentas()" title="Exportar e histórico">⚙️</button>
       <button class="btn-notif" onclick="abrirPlano()">🤖 IA</button>
       <button class="btn-sair" onclick="sair()">↩</button>
     </div>
@@ -502,6 +503,56 @@
   </div>
 </div>
 
+<!-- ══ MODAL FERRAMENTAS ══ -->
+<div id="modal-ferramentas" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-ferramentas')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>⚙️ Ferramentas</h3>
+
+    <div class="ferr-secao">
+      <div class="ferr-titulo">📤 Exportar dados do mês atual</div>
+      <button class="ferr-btn" onclick="exportarCSV();fecharModal('modal-ferramentas')">
+        <span class="ferr-icon">📄</span>
+        <div>
+          <div class="ferr-nome">Exportar CSV</div>
+          <div class="ferr-sub">Abre no Excel / Google Sheets</div>
+        </div>
+        <span>→</span>
+      </button>
+      <button class="ferr-btn" onclick="abrirRelatorioHTML();fecharModal('modal-ferramentas')">
+        <span class="ferr-icon">🖨️</span>
+        <div>
+          <div class="ferr-nome">Relatório PDF</div>
+          <div class="ferr-sub">Abre para imprimir ou salvar como PDF</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
+    <div class="ferr-secao">
+      <div class="ferr-titulo">📥 Importações</div>
+      <button class="ferr-btn" onclick="abrirHistoricoImportacoes();fecharModal('modal-ferramentas')">
+        <span class="ferr-icon">🕓</span>
+        <div>
+          <div class="ferr-nome">Histórico de importações</div>
+          <div class="ferr-sub">Ver o que foi importado e quantas duplicatas foram bloqueadas</div>
+        </div>
+        <span>→</span>
+      </button>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirUpload()">
+        <span class="ferr-icon">📸</span>
+        <div>
+          <div class="ferr-nome">Importar extrato ou fatura</div>
+          <div class="ferr-sub">Até 6 prints ou PDFs simultâneos</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
+    <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="fecharModal('modal-ferramentas')">Fechar</button>
+  </div>
+</div>
+
 <!-- ══ MODAL UPLOAD (imagem/PDF/CSV) ══ -->
 <div id="modal-upload" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-upload')">
   <div class="modal-sheet">
@@ -521,13 +572,13 @@
            ondragleave="this.classList.remove('drag')"
            ondrop="event.preventDefault();this.classList.remove('drag');handleArquivoDrop(event)">
         <div class="up-icon">📁</div>
-        <div class="up-texto">Toque para selecionar ou arraste o arquivo</div>
-        <div class="up-sub">JPG · PNG · WebP · PDF — até 15 MB</div>
-        <div id="up-preview-nome" class="up-preview-nome" style="display:none"></div>
+        <div class="up-texto">Toque para selecionar ou arraste os arquivos</div>
+        <div class="up-sub">Até 6 arquivos · JPG · PNG · WebP · PDF · 15 MB cada</div>
       </div>
-      <input id="up-arquivo" type="file" accept="image/*,application/pdf" style="display:none" onchange="handleArquivoSelect(this)">
+      <input id="up-arquivo" type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="handleArquivoSelect(this)">
+      <div id="up-lista-arquivos" class="up-lista-arquivos"></div>
 
-      <label class="input-label" style="margin-top:12px">Para qual usuário é este documento?</label>
+      <label class="input-label" style="margin-top:4px">Para qual usuário é este documento?</label>
       <select id="up-usuario" class="select-input"></select>
     </div>
 

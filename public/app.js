@@ -1081,20 +1081,19 @@ async function salvarGastoManual() {
 
 // ── UPLOAD / ANÁLISE DE ARQUIVO ──
 let uploadTabAtual = 'imagem'
-let arquivoSelecionado = null
+let arquivosSelecionados = []
 let csvSelecionado = null
-let analiseResultado = null
+let analiseResultados = []
 let csvRegistros = null
 
 function abrirUpload() {
-  arquivoSelecionado = null
+  arquivosSelecionados = []
   csvSelecionado = null
-  document.getElementById('up-preview-nome').style.display = 'none'
+  document.getElementById('up-lista-arquivos').innerHTML = ''
   document.getElementById('up-csv-nome').style.display = 'none'
   document.getElementById('up-arquivo').value = ''
   document.getElementById('up-csv').value = ''
 
-  // Popula selects de usuário
   const usuarios = USUARIOS_CACHE.length ? USUARIOS_CACHE : [usuario]
   const opts = usuarios.map(u => `<option value="${u.id}"${u.id === usuario.id ? ' selected' : ''}>${u.nome}</option>`).join('')
   document.getElementById('up-usuario').innerHTML = opts
@@ -1114,12 +1113,32 @@ function selUploadTab(btn, tab) {
   btnEnviar.textContent = tab === 'imagem' ? '🔍 Analisar com IA' : '📊 Processar CSV'
 }
 
+function renderListaArquivos() {
+  const el = document.getElementById('up-lista-arquivos')
+  if (!arquivosSelecionados.length) { el.innerHTML = ''; return }
+  el.innerHTML = arquivosSelecionados.map((f, i) => `
+    <div class="up-arquivo-item">
+      <span>${f.type === 'application/pdf' ? '📄' : '🖼️'} ${f.name}</span>
+      <span class="up-arquivo-kb">${(f.size/1024).toFixed(0)} KB</span>
+      <button onclick="removerArquivo(${i})">✕</button>
+    </div>
+  `).join('')
+  const btnEnviar = document.getElementById('up-btn-enviar')
+  btnEnviar.textContent = `🔍 Analisar ${arquivosSelecionados.length} arquivo${arquivosSelecionados.length > 1 ? 's' : ''}`
+}
+
+function removerArquivo(i) {
+  arquivosSelecionados.splice(i, 1)
+  renderListaArquivos()
+}
+
 function handleArquivoSelect(input) {
-  if (!input.files[0]) return
-  arquivoSelecionado = input.files[0]
-  const el = document.getElementById('up-preview-nome')
-  el.textContent = `📎 ${arquivoSelecionado.name} (${(arquivoSelecionado.size/1024).toFixed(0)} KB)`
-  el.style.display = 'block'
+  const novos = Array.from(input.files || [])
+  for (const f of novos) {
+    if (arquivosSelecionados.length >= 6) { toast('Máximo de 6 arquivos por vez', 'erro'); break }
+    arquivosSelecionados.push(f)
+  }
+  renderListaArquivos()
 }
 
 function handleCSVSelect(input) {
@@ -1131,17 +1150,17 @@ function handleCSVSelect(input) {
 }
 
 function handleArquivoDrop(event) {
-  const file = event.dataTransfer.files[0]
-  if (!file) return
-  arquivoSelecionado = file
-  const el = document.getElementById('up-preview-nome')
-  el.textContent = `📎 ${file.name} (${(file.size/1024).toFixed(0)} KB)`
-  el.style.display = 'block'
+  const novos = Array.from(event.dataTransfer.files || [])
+  for (const f of novos) {
+    if (arquivosSelecionados.length >= 6) { toast('Máximo de 6 arquivos por vez', 'erro'); break }
+    arquivosSelecionados.push(f)
+  }
+  renderListaArquivos()
 }
 
 async function enviarUpload() {
   if (uploadTabAtual === 'imagem') {
-    if (!arquivoSelecionado) { toast('Selecione um arquivo!', 'erro'); return }
+    if (!arquivosSelecionados.length) { toast('Selecione pelo menos um arquivo!', 'erro'); return }
     await processarImagem()
   } else {
     if (!csvSelecionado) { toast('Selecione um arquivo CSV!', 'erro'); return }
@@ -1152,24 +1171,25 @@ async function enviarUpload() {
 async function processarImagem() {
   const btn = document.getElementById('up-btn-enviar')
   btn.disabled = true
-  btn.textContent = '⏳ Analisando...'
+  const n = arquivosSelecionados.length
+  btn.textContent = `⏳ Analisando ${n} arquivo${n > 1 ? 's' : ''}...`
 
   try {
     const formData = new FormData()
-    formData.append('arquivo', arquivoSelecionado)
+    arquivosSelecionados.forEach(f => formData.append('arquivos', f))
 
     const res = await fetch('/api/analisar-arquivo', { method: 'POST', body: formData })
     const data = await res.json()
     if (!res.ok) throw new Error(data.erro || 'Erro na análise')
 
-    analiseResultado = data
+    analiseResultados = data.resultados || []
     fecharModal('modal-upload')
-    mostrarResultadoAnalise(data)
+    mostrarResultadosAnalise(analiseResultados)
   } catch (e) {
     toast('❌ ' + e.message, 'erro')
   } finally {
     btn.disabled = false
-    btn.textContent = '🔍 Analisar com IA'
+    renderListaArquivos()
   }
 }
 
@@ -1197,142 +1217,122 @@ async function processarCSV() {
   }
 }
 
-function mostrarResultadoAnalise(data) {
+// Renderiza múltiplos resultados (um card por arquivo analisado)
+async function mostrarResultadosAnalise(resultados) {
   const modal = document.getElementById('modal-resultado-upload')
   const titulo = document.getElementById('res-titulo')
   const conteudo = document.getElementById('res-conteudo')
   const btns = document.getElementById('res-btns')
   const usuarioId = parseInt(document.getElementById('up-usuario').value)
 
-  if (data.tipo === 'erro') {
-    titulo.textContent = '❌ Não foi possível analisar'
-    conteudo.innerHTML = `<p class="res-desc">${data.mensagem || 'Tente com uma imagem mais nítida.'}</p>`
-    btns.innerHTML = `<button class="btn-confirm" onclick="fecharModal('modal-resultado-upload')">Fechar</button>`
-    modal.style.display = 'flex'
-    return
-  }
+  titulo.textContent = `📊 ${resultados.length} arquivo${resultados.length > 1 ? 's' : ''} analisado${resultados.length > 1 ? 's' : ''}`
 
-  if (data.tipo === 'extrato') {
-    titulo.textContent = '🏦 Extrato Bancário Detectado'
-    const contas = USUARIOS_CACHE.length
-      ? [] // será preenchido abaixo
-      : []
+  // Carrega contas e cartões para os selects
+  const [contas, cartoes] = await Promise.all([api('/contas').catch(() => []), api('/cartoes').catch(() => [])])
 
-    conteudo.innerHTML = `
-      <div class="res-info-card">
-        <div class="res-info-row"><span>Banco</span><strong>${data.banco || '—'}</strong></div>
-        <div class="res-info-row"><span>Tipo</span><strong>${data.conta_tipo || 'corrente'}</strong></div>
-        <div class="res-info-row res-destaque"><span>Saldo detectado</span><strong class="verde">${fmt(data.saldo || 0)}</strong></div>
-      </div>
-      ${data.transacoes?.length ? `
-        <div class="res-secao-titulo">📋 ${data.transacoes.length} transação(ões) detectada(s)</div>
-        <div class="res-lista">
-          ${data.transacoes.slice(0,5).map(t => `
-            <div class="res-tx-item ${t.tipo_tx}">
-              <span class="res-tx-desc">${t.descricao}</span>
-              <span class="res-tx-val">${t.tipo_tx === 'debito' ? '-' : '+'}${fmt(t.valor)}</span>
-            </div>`).join('')}
-          ${data.transacoes.length > 5 ? `<div class="res-mais">+ ${data.transacoes.length - 5} mais...</div>` : ''}
-        </div>` : ''}
-      <label class="input-label" style="margin-top:12px">Qual conta atualizar?</label>
-      <select id="res-conta-id" class="select-input"><option value="">— Criar nova conta —</option></select>
-    `
-    // Carrega contas no select
-    api('/contas').then(contas => {
-      const sel = document.getElementById('res-conta-id')
-      if (!sel) return
-      contas.forEach(c => {
-        const opt = document.createElement('option')
-        opt.value = c.id
-        opt.textContent = `${c.nome} (${fmt(c.saldo)})`
-        if ((c.banco || c.nome).toLowerCase().includes((data.banco || '').toLowerCase())) opt.selected = true
-        sel.appendChild(opt)
-      })
-    }).catch(() => {})
+  conteudo.innerHTML = resultados.map((data, idx) => renderCardResultado(data, idx, contas, cartoes)).join('')
 
-    btns.innerHTML = `
-      <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
-      <button class="btn-confirm btn-verde" onclick="aplicarAnalise('extrato',${usuarioId})">✅ Aplicar</button>
-    `
-  }
-
-  if (data.tipo === 'fatura_cartao') {
-    titulo.textContent = '💳 Fatura de Cartão Detectada'
-    const itensParcelas = (data.itens || []).filter(i => i.total_parcelas > 1)
-    const itensNormais = (data.itens || []).filter(i => i.total_parcelas <= 1)
-
-    conteudo.innerHTML = `
-      <div class="res-info-card">
-        <div class="res-info-row"><span>Cartão / Banco</span><strong>${data.banco || '—'}</strong></div>
-        <div class="res-info-row"><span>Vencimento</span><strong>${data.vencimento ? new Date(data.vencimento+'T00:00:00').toLocaleDateString('pt-BR') : '—'}</strong></div>
-        <div class="res-info-row res-destaque"><span>Total da fatura</span><strong class="vermelho">${fmt(data.valor_total || 0)}</strong></div>
-      </div>
-      ${itensParcelas.length ? `
-        <div class="res-secao-titulo">🔄 ${itensParcelas.length} compra(s) parcelada(s)</div>
-        <div class="res-lista">
-          ${itensParcelas.map(i => `
-            <div class="res-tx-item debito">
-              <span class="res-tx-desc">${i.descricao} <em>(${i.parcela_atual}/${i.total_parcelas})</em></span>
-              <span class="res-tx-val">${fmt(i.valor)}/mês</span>
-            </div>`).join('')}
-        </div>` : ''}
-      ${itensNormais.length ? `
-        <div class="res-secao-titulo">📋 ${itensNormais.length} compra(s) avulsa(s)</div>
-        <div class="res-lista">
-          ${itensNormais.slice(0,4).map(i => `
-            <div class="res-tx-item debito">
-              <span class="res-tx-desc">${i.descricao}</span>
-              <span class="res-tx-val">${fmt(i.valor)}</span>
-            </div>`).join('')}
-          ${itensNormais.length > 4 ? `<div class="res-mais">+ ${itensNormais.length - 4} mais...</div>` : ''}
-        </div>` : ''}
-      <label class="input-label" style="margin-top:12px">Qual cartão atualizar?</label>
-      <select id="res-cartao-id" class="select-input"><option value="">— Não atualizar cartão —</option></select>
-    `
-    // Carrega cartões no select
-    api('/cartoes').then(cartoes => {
-      const sel = document.getElementById('res-cartao-id')
-      if (!sel) return
-      cartoes.forEach(c => {
-        const opt = document.createElement('option')
-        opt.value = c.id
-        opt.textContent = `${c.nome} (fatura atual: ${fmt(c.gasto_atual)})`
-        if (c.nome.toLowerCase().includes((data.banco || '').toLowerCase())) opt.selected = true
-        sel.appendChild(opt)
-      })
-    }).catch(() => {})
-
-    btns.innerHTML = `
-      <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
-      <button class="btn-confirm btn-verde" onclick="aplicarAnalise('fatura_cartao',${usuarioId})">✅ Aplicar tudo</button>
-    `
-  }
-
+  btns.innerHTML = `
+    <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
+    <button class="btn-confirm btn-verde" onclick="aplicarTodosResultados(${usuarioId})">✅ Aplicar todos</button>
+  `
   modal.style.display = 'flex'
 }
 
-async function aplicarAnalise(tipo, usuarioId) {
-  try {
-    const cartaoId = document.getElementById('res-cartao-id')?.value || null
-    const contaId = document.getElementById('res-conta-id')?.value || null
-
-    const res = await api('/aplicar-analise', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuarioId, analise: analiseResultado, cartaoId: cartaoId || null, contaId: contaId || null })
-    })
-
-    fecharModal('modal-resultado-upload')
-    const msg = tipo === 'fatura_cartao'
-      ? `💳 Fatura atualizada! ${res.aplicados} compra(s) importada(s).`
-      : `🏦 Conta atualizada! ${res.aplicados} transação(ões) importada(s).`
-    toast(msg)
-    carregarInicio()
-    if (tipo === 'fatura_cartao') carregarCartoes()
-    else if (document.getElementById('aba-contas').style.display !== 'none') carregarContas()
-  } catch (e) {
-    toast('❌ Erro ao aplicar: ' + e.message, 'erro')
+function renderCardResultado(data, idx, contas, cartoes) {
+  if (data.tipo === 'erro') {
+    return `<div class="res-card-bloco erro-bloco">❌ Arquivo ${idx+1}: ${data.mensagem || 'Não foi possível analisar'}</div>`
   }
+
+  if (data.tipo === 'extrato') {
+    const optsContas = `<option value="">— Criar nova conta —</option>` +
+      contas.map(c => {
+        const sel = (c.banco||c.nome).toLowerCase().includes((data.banco||'').toLowerCase()) ? ' selected' : ''
+        return `<option value="${c.id}"${sel}>${c.nome} (${fmt(c.saldo)})</option>`
+      }).join('')
+    return `
+      <div class="res-card-bloco">
+        <div class="res-card-label">🏦 Arquivo ${idx+1} — Extrato Bancário</div>
+        <div class="res-info-card">
+          <div class="res-info-row"><span>Banco</span><strong>${data.banco||'—'}</strong></div>
+          <div class="res-info-row res-destaque"><span>Saldo detectado</span><strong class="verde">${fmt(data.saldo||0)}</strong></div>
+          ${data.transacoes?.length ? `<div class="res-info-row"><span>Transações</span><strong>${data.transacoes.length}</strong></div>` : ''}
+        </div>
+        ${data.transacoes?.slice(0,3).map(t => `
+          <div class="res-tx-item ${t.tipo_tx}">
+            <span class="res-tx-desc">${t.descricao}</span>
+            <span class="res-tx-val">${t.tipo_tx==='debito'?'-':'+'}${fmt(t.valor)}</span>
+          </div>`).join('')||''}
+        ${(data.transacoes?.length||0) > 3 ? `<div class="res-mais">+ ${data.transacoes.length-3} transações...</div>` : ''}
+        <label class="input-label" style="margin-top:10px">Conta para atualizar:</label>
+        <select class="select-input res-conta-sel" data-idx="${idx}">${optsContas}</select>
+      </div>`
+  }
+
+  if (data.tipo === 'fatura_cartao') {
+    const parcelas = (data.itens||[]).filter(i=>i.total_parcelas>1)
+    const simples = (data.itens||[]).filter(i=>i.total_parcelas<=1)
+    const optsCartoes = `<option value="">— Não atualizar cartão —</option>` +
+      cartoes.map(c => {
+        const sel = c.nome.toLowerCase().includes((data.banco||'').toLowerCase()) ? ' selected' : ''
+        return `<option value="${c.id}"${sel}>${c.nome} (fatura: ${fmt(c.gasto_atual)})</option>`
+      }).join('')
+    return `
+      <div class="res-card-bloco">
+        <div class="res-card-label">💳 Arquivo ${idx+1} — Fatura de Cartão</div>
+        <div class="res-info-card">
+          <div class="res-info-row"><span>Banco / Cartão</span><strong>${data.banco||'—'}</strong></div>
+          <div class="res-info-row"><span>Vencimento</span><strong>${data.vencimento?new Date(data.vencimento+'T00:00:00').toLocaleDateString('pt-BR'):'—'}</strong></div>
+          <div class="res-info-row res-destaque"><span>Total da fatura</span><strong class="vermelho">${fmt(data.valor_total||0)}</strong></div>
+          ${parcelas.length ? `<div class="res-info-row"><span>🔄 Parceladas</span><strong>${parcelas.length} compra(s)</strong></div>` : ''}
+          ${simples.length ? `<div class="res-info-row"><span>📋 Avulsas</span><strong>${simples.length} compra(s)</strong></div>` : ''}
+        </div>
+        ${[...parcelas.slice(0,2), ...simples.slice(0,2)].map(i => `
+          <div class="res-tx-item debito">
+            <span class="res-tx-desc">${i.descricao}${i.total_parcelas>1?` <em>(${i.parcela_atual}/${i.total_parcelas})</em>`:''}</span>
+            <span class="res-tx-val">${fmt(i.valor)}${i.total_parcelas>1?'/mês':''}</span>
+          </div>`).join('')}
+        ${(data.itens?.length||0) > 4 ? `<div class="res-mais">+ ${data.itens.length-4} itens...</div>` : ''}
+        <label class="input-label" style="margin-top:10px">Cartão para atualizar:</label>
+        <select class="select-input res-cartao-sel" data-idx="${idx}">${optsCartoes}</select>
+      </div>`
+  }
+
+  return `<div class="res-card-bloco">❓ Arquivo ${idx+1}: tipo não reconhecido</div>`
+}
+
+async function aplicarTodosResultados(usuarioId) {
+  let totalAplicados = 0, totalDuplicatas = 0
+  const erros = []
+
+  for (let i = 0; i < analiseResultados.length; i++) {
+    const analise = analiseResultados[i]
+    if (analise.tipo === 'erro') continue
+
+    const cartaoSel = document.querySelector(`.res-cartao-sel[data-idx="${i}"]`)
+    const contaSel = document.querySelector(`.res-conta-sel[data-idx="${i}"]`)
+    const cartaoId = cartaoSel?.value || null
+    const contaId = contaSel?.value || null
+
+    try {
+      const res = await api('/aplicar-analise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuarioId, analise, cartaoId, contaId })
+      })
+      totalAplicados += res.aplicados || 0
+      totalDuplicatas += res.duplicatas || 0
+    } catch (e) {
+      erros.push(`Arquivo ${i+1}: ${e.message}`)
+    }
+  }
+
+  fecharModal('modal-resultado-upload')
+  const dupMsg = totalDuplicatas > 0 ? ` (${totalDuplicatas} duplicata${totalDuplicatas>1?'s':''} ignorada${totalDuplicatas>1?'s':''})` : ''
+  if (erros.length) toast(`⚠️ ${totalAplicados} item(s) importado(s)${dupMsg}. ${erros.length} erro(s).`, 'erro')
+  else toast(`✅ ${totalAplicados} item(s) importado(s)!${dupMsg}`)
+  carregarInicio()
+  carregarCartoes()
 }
 
 function mostrarResultadoCSV(data) {
@@ -1618,6 +1618,121 @@ async function abrirPlano() {
     document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">${plano}</div>`
   } catch {
     document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">❌ Erro ao gerar plano. Tente novamente.</div>`
+  }
+}
+
+// ── FERRAMENTAS ──
+function abrirMenuFerramentas() {
+  document.getElementById('modal-ferramentas').style.display = 'flex'
+}
+
+// ── EXPORTAÇÃO ──
+function exportarCSV() {
+  const now = new Date()
+  const mes = now.getMonth() + 1
+  const ano = now.getFullYear()
+  window.location.href = `/api/exportar/csv?mes=${mes}&ano=${ano}`
+  toast('📥 Download do CSV iniciado!')
+}
+
+async function abrirRelatorioHTML() {
+  const now = new Date()
+  const mes = now.getMonth() + 1
+  const ano = now.getFullYear()
+  toast('⏳ Gerando relatório...')
+  try {
+    const { gastos, receitas, resumo } = await api(`/exportar/dados?mes=${mes}&ano=${ano}`)
+    const nomeMes = now.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
+    const totalReceitas = receitas.reduce((a, r) => a + r.valor, 0) + (resumo.salarioTotal || 0)
+    const totalGastos = gastos.reduce((a, g) => a + g.valor, 0)
+    const resultado = totalReceitas - totalGastos
+
+    const catMap = {}
+    for (const g of gastos) {
+      catMap[g.categoria] = (catMap[g.categoria] || 0) + g.valor
+    }
+    const cats = Object.entries(catMap).sort((a,b) => b[1]-a[1])
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head>
+      <meta charset="UTF-8"><title>Relatório ${nomeMes}</title>
+      <style>
+        body{font-family:system-ui,sans-serif;max-width:800px;margin:0 auto;padding:24px;color:#1e293b}
+        h1{font-size:1.5rem;margin-bottom:4px}
+        .sub{color:#64748b;font-size:.9rem;margin-bottom:24px}
+        .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+        .card{background:#f8fafc;border-radius:12px;padding:16px;border-top:4px solid #2563eb}
+        .card.verde{border-color:#16a34a}.card.vermelho{border-color:#dc2626}
+        .card-label{font-size:.7rem;color:#64748b;text-transform:uppercase;margin-bottom:6px}
+        .card-val{font-size:1.3rem;font-weight:800}
+        table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:12px}
+        th{background:#f1f5f9;padding:8px 10px;text-align:left;font-size:.75rem;color:#64748b;text-transform:uppercase}
+        td{padding:8px 10px;border-bottom:1px solid #f1f5f9}
+        tr:hover td{background:#fafafa}
+        .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.7rem;font-weight:600}
+        .tag.receita{background:#dcfce7;color:#16a34a}.tag.despesa{background:#fee2e2;color:#dc2626}
+        h2{margin:24px 0 10px;font-size:1.1rem;color:#334155}
+        @media print{body{padding:0}.no-print{display:none}}
+      </style>
+    </head><body>
+      <div class="no-print" style="margin-bottom:16px">
+        <button onclick="window.print()" style="padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;margin-right:8px">🖨️ Imprimir / Salvar PDF</button>
+        <button onclick="window.close()" style="padding:8px 16px;background:#f1f5f9;border:none;border-radius:8px;cursor:pointer">Fechar</button>
+      </div>
+      <h1>💰 Relatório Financeiro</h1>
+      <div class="sub">FinançasFamília · ${nomeMes.charAt(0).toUpperCase()+nomeMes.slice(1)}</div>
+      <div class="cards">
+        <div class="card verde"><div class="card-label">Renda Total</div><div class="card-val" style="color:#16a34a">R$ ${totalReceitas.toFixed(2).replace('.',',')}</div></div>
+        <div class="card vermelho"><div class="card-label">Total Gastos</div><div class="card-val" style="color:#dc2626">R$ ${totalGastos.toFixed(2).replace('.',',')}</div></div>
+        <div class="card"><div class="card-label">Resultado</div><div class="card-val" style="color:${resultado>=0?'#16a34a':'#dc2626'}">${resultado>=0?'+':''}R$ ${resultado.toFixed(2).replace('.',',')}</div></div>
+      </div>
+      ${cats.length ? `<h2>📊 Por Categoria</h2><table><tr><th>Categoria</th><th>Total</th><th>% da renda</th></tr>
+        ${cats.map(([cat,val]) => `<tr><td>${cat}</td><td>R$ ${val.toFixed(2).replace('.',',')}</td><td>${totalReceitas>0?((val/totalReceitas)*100).toFixed(1):0}%</td></tr>`).join('')}
+      </table>` : ''}
+      <h2>📋 Lançamentos</h2>
+      <table>
+        <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Tipo</th><th>Pessoa</th></tr>
+        ${receitas.map(r => `<tr><td>${r.data_receita}</td><td>${r.descricao}</td><td>Receita</td><td style="color:#16a34a">+R$ ${Number(r.valor).toFixed(2).replace('.',',')}</td><td><span class="tag receita">Entrada</span></td><td>${r.usuario_nome}</td></tr>`).join('')}
+        ${gastos.map(g => `<tr><td>${g.data_gasto}</td><td>${g.descricao}</td><td>${g.categoria}</td><td style="color:#dc2626">-R$ ${Number(g.valor).toFixed(2).replace('.',',')}</td><td><span class="tag despesa">Gasto</span></td><td>${g.usuario_nome}</td></tr>`).join('')}
+      </table>
+      <div style="margin-top:32px;font-size:.75rem;color:#94a3b8;text-align:center">Gerado pelo FinançasFamília · ${new Date().toLocaleString('pt-BR')}</div>
+    </body></html>`
+
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  } catch (e) {
+    toast('❌ Erro ao gerar relatório: ' + e.message, 'erro')
+  }
+}
+
+async function abrirHistoricoImportacoes() {
+  const modal = document.getElementById('modal-resultado-upload')
+  const titulo = document.getElementById('res-titulo')
+  const conteudo = document.getElementById('res-conteudo')
+  const btns = document.getElementById('res-btns')
+
+  titulo.textContent = '📥 Histórico de Importações'
+  conteudo.innerHTML = '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
+  btns.innerHTML = `<button class="btn-confirm" onclick="fecharModal('modal-resultado-upload')">Fechar</button>`
+  modal.style.display = 'flex'
+
+  try {
+    const lista = await api(`/importacoes?usuarioId=${usuario.id}`)
+    if (!lista.length) {
+      conteudo.innerHTML = `<p class="res-desc" style="text-align:center;padding:24px">Nenhuma importação realizada ainda.</p>`
+      return
+    }
+    const TIPO_LABEL = { csv: '📄 CSV', imagem_extrato: '🏦 Extrato', imagem_fatura: '💳 Fatura' }
+    conteudo.innerHTML = lista.map(imp => {
+      const data = new Date(imp.criado_em).toLocaleString('pt-BR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+      const dup = imp.duplicatas_ignoradas > 0 ? ` · ${imp.duplicatas_ignoradas} dup.` : ''
+      return `<div class="res-info-row" style="padding:10px 0">
+        <span>${TIPO_LABEL[imp.tipo]||'📥'} <strong>${imp.descricao||imp.tipo}</strong><br><small style="color:#94a3b8">${data}</small></span>
+        <span style="text-align:right"><strong>${imp.qtd_registros}</strong> registros${dup}</span>
+      </div>`
+    }).join('')
+  } catch (e) {
+    conteudo.innerHTML = `<p class="res-desc">Erro ao carregar: ${e.message}</p>`
   }
 }
 

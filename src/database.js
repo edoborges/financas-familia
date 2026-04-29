@@ -11,6 +11,8 @@ db.exec('PRAGMA journal_mode = WAL')
 try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS usuarios (
@@ -100,6 +102,17 @@ db.exec(`
     valor REAL NOT NULL,
     descricao TEXT DEFAULT 'Salário',
     data_receita DATE DEFAULT (date('now','localtime')),
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS importacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    descricao TEXT,
+    qtd_registros INTEGER DEFAULT 0,
+    duplicatas_ignoradas INTEGER DEFAULT 0,
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
   );
@@ -320,6 +333,46 @@ function resumoFinanceiro() {
   return { salarioTotal, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao }
 }
 
+// ===== IMPORTAÇÕES & HISTÓRICO =====
+function registrarImportacao(usuarioId, tipo, descricao, qtd, duplicatas = 0) {
+  return db.prepare('INSERT INTO importacoes (usuario_id, tipo, descricao, qtd_registros, duplicatas_ignoradas) VALUES (?, ?, ?, ?, ?)').run(usuarioId, tipo, descricao, qtd, duplicatas)
+}
+function listarImportacoes(usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT * FROM importacoes WHERE usuario_id = ? ORDER BY criado_em DESC LIMIT 30').all(usuarioId)
+  return db.prepare('SELECT * FROM importacoes ORDER BY criado_em DESC LIMIT 30').all()
+}
+
+// ===== DUPLICATAS =====
+function verificarDuplicataGasto(usuarioId, descricao, valor, data) {
+  if (data) {
+    const row = db.prepare(`SELECT id FROM gastos WHERE usuario_id = ? AND ABS(valor - ?) < 0.01 AND ABS(JULIANDAY(data_gasto) - JULIANDAY(?)) <= 1 AND LOWER(TRIM(descricao)) = LOWER(TRIM(?))`).get(usuarioId, valor, data, descricao)
+    return !!row
+  }
+  const now = new Date()
+  const mesStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+  const row = db.prepare(`SELECT id FROM gastos WHERE usuario_id = ? AND ABS(valor - ?) < 0.01 AND strftime('%Y-%m', data_gasto) = ? AND LOWER(TRIM(descricao)) = LOWER(TRIM(?))`).get(usuarioId, valor, mesStr, descricao)
+  return !!row
+}
+
+// ===== EXPORTAÇÃO =====
+function listarGastosExport(mes = null, ano = null) {
+  const now = new Date()
+  const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  return db.prepare(`
+    SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome
+    FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id
+    WHERE strftime('%Y-%m', g.data_gasto) = ? ORDER BY g.data_gasto DESC, g.criado_em DESC
+  `).all(mesStr)
+}
+function listarReceitasExport(mes = null, ano = null) {
+  const now = new Date()
+  const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  return db.prepare(`
+    SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id
+    WHERE strftime('%Y-%m', r.data_receita) = ? ORDER BY r.data_receita DESC
+  `).all(mesStr)
+}
+
 // ===== ALERTAS =====
 function alertasVencimento() {
   const hoje = new Date()
@@ -345,6 +398,9 @@ module.exports = {
   criarMeta, listarMetas, atualizarMeta,
   registrarReceita, listarReceitas, totalReceitasMes, deletarReceita, receitasPorMes,
   projecaoGastosMeses,
+  registrarImportacao, listarImportacoes,
+  verificarDuplicataGasto,
+  listarGastosExport, listarReceitasExport,
   alertasVencimento,
   resumoFinanceiro
 }
