@@ -1,0 +1,935 @@
+// ═══════════════════════════════════
+//  FinançasFamília — App.js
+// ═══════════════════════════════════
+let usuario = null
+let graficoInstance = null
+let metaEmojiSel = '🎯'
+
+const AVATARES = ['👨','👩','🧑','👦','👧','👤']
+const SAUDACOES = () => {
+  const h = new Date().getHours()
+  if (h < 12) return 'Bom dia'
+  if (h < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
+const EMOJI_CAT = {
+  'Alimentação':'🍽️','Mercado':'🛒','Saúde':'💊','Farmácia':'💊',
+  'Transporte':'🚗','Combustível':'⛽','Educação':'📚','Lazer':'🎉',
+  'Vestuário':'👕','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱',
+  'Restaurante':'🍕','Outros':'📦'
+}
+const fmt = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
+
+// Converte valor digitado em formato brasileiro (1.500,00 ou 1500,50 ou 1500.50) para número
+function parseBRL(str) {
+  if (!str) return 0
+  const s = String(str).trim()
+    .replace(/[R$\s]/g, '')   // remove R$ e espaços
+    .replace(/\./g, '')        // remove pontos de milhar
+    .replace(',', '.')         // troca vírgula decimal por ponto
+  return parseFloat(s) || 0
+}
+const api = (url,opts) => fetch('/api'+url,opts).then(r=>r.json())
+
+// ── INIT ──
+let USUARIOS_CACHE = []
+
+async function init() {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js')
+
+  const salvo = localStorage.getItem('fin_usuario')
+  if (salvo) {
+    try {
+      usuario = JSON.parse(salvo)
+      usuario.id = Number(usuario.id)
+      mostrarApp()
+      return
+    } catch(e) {
+      localStorage.removeItem('fin_usuario')
+    }
+  }
+
+  const { configurado, usuarios } = await api('/status')
+  USUARIOS_CACHE = usuarios || []
+  if (!configurado) {
+    show('tela-setup')
+  } else {
+    show('tela-login')
+    renderLogin(USUARIOS_CACHE)
+  }
+}
+
+function show(id) {
+  document.querySelectorAll('.tela, #app').forEach(el => el.style.display = 'none')
+  const el = document.getElementById(id)
+  el.style.display = id === 'app' ? 'flex' : 'flex'
+  el.style.flexDirection = id === 'app' ? 'column' : ''
+}
+
+// ── SETUP ──
+async function concluirSetup() {
+  const n1 = document.getElementById('s-nome1').value.trim()
+  const s1 = parseBRL(document.getElementById('s-sal1').value)
+  const c1 = document.getElementById('s-cel1').value.trim()
+  const p1 = document.getElementById('s-pin1').value.trim()
+  const n2 = document.getElementById('s-nome2').value.trim()
+  const s2 = parseBRL(document.getElementById('s-sal2').value)
+  const c2 = document.getElementById('s-cel2').value.trim()
+  const p2 = document.getElementById('s-pin2').value.trim()
+
+  if (!n1 || !n2) { alert('Preencha os dois nomes!'); return }
+  if (!/^\d{4}$/.test(p1)) { alert('PIN do 1º usuário: exatamente 4 dígitos!'); return }
+  if (!/^\d{4}$/.test(p2)) { alert('PIN do 2º usuário: exatamente 4 dígitos!'); return }
+
+  await api('/usuarios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:n1,salario:s1,telefone:c1,pin:p1})})
+  await api('/usuarios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:n2,salario:s2,telefone:c2,pin:p2})})
+
+  const { usuarios } = await api('/status')
+  USUARIOS_CACHE = usuarios || []
+  show('tela-login')
+  renderLogin(USUARIOS_CACHE)
+}
+
+// ── LOGIN ──
+function renderLogin(usuarios) {
+  USUARIOS_CACHE = usuarios || []
+  const container = document.getElementById('login-cards')
+  container.innerHTML = USUARIOS_CACHE.map((u, i) => {
+    const cel = u.telefone && u.telefone.length >= 4 ? '···· ' + u.telefone.slice(-4) : (u.telefone || '')
+    return `
+      <button class="login-card" data-idx="${i}">
+        <div class="login-avatar">${AVATARES[i] || '👤'}</div>
+        <div class="login-info">
+          <div class="login-nome">${u.nome}</div>
+          <div class="login-sal">${cel ? '📱 ' + cel : 'Toque para entrar'}</div>
+        </div>
+        <span class="login-arrow">🔑</span>
+      </button>
+    `
+  }).join('')
+
+  container.querySelectorAll('.login-card').forEach(btn => {
+    btn.addEventListener('click', () => abrirPinModal(parseInt(btn.dataset.idx)))
+  })
+}
+
+// ── PIN MODAL ──
+let pinUsuarioIdx = null
+let pinAtual = ''
+
+function abrirPinModal(idx) {
+  pinUsuarioIdx = idx
+  pinAtual = ''
+  const u = USUARIOS_CACHE[idx]
+  if (!u) return
+  document.getElementById('pin-avatar').textContent = AVATARES[idx] || '👤'
+  document.getElementById('pin-nome').textContent = 'Olá, ' + u.nome + '! 👋'
+  const cel = u.telefone && u.telefone.length >= 4 ? '📱 ···· ' + u.telefone.slice(-4) : ''
+  document.getElementById('pin-cel').textContent = cel
+  document.getElementById('pin-erro').style.display = 'none'
+  atualizarPinDots()
+  document.getElementById('modal-pin').style.display = 'flex'
+}
+
+function pinDigito(d) {
+  if (pinAtual.length >= 4) return
+  pinAtual += d
+  atualizarPinDots()
+  if (pinAtual.length === 4) setTimeout(verificarPin, 120)
+}
+
+function pinApagar() {
+  pinAtual = pinAtual.slice(0, -1)
+  atualizarPinDots()
+  document.getElementById('pin-erro').style.display = 'none'
+}
+
+function atualizarPinDots() {
+  document.querySelectorAll('.pin-dot').forEach((dot, i) => {
+    dot.classList.toggle('filled', i < pinAtual.length)
+  })
+}
+
+async function verificarPin() {
+  const u = USUARIOS_CACHE[pinUsuarioIdx]
+  if (!u) return
+  try {
+    const res = await api('/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ usuarioId: u.id, pin: pinAtual })
+    })
+    if (res.erro) {
+      pinAtual = ''
+      atualizarPinDots()
+      document.getElementById('pin-erro').style.display = 'block'
+      const dots = document.getElementById('pin-dots')
+      dots.classList.remove('shake')
+      void dots.offsetWidth // força reflow para reiniciar animação
+      dots.classList.add('shake')
+      return
+    }
+    fecharModal('modal-pin')
+    usuario = { ...res, id: Number(res.id) }
+    localStorage.setItem('fin_usuario', JSON.stringify(usuario))
+    mostrarApp()
+  } catch(e) {
+    pinAtual = ''
+    atualizarPinDots()
+    alert('Erro de conexão. Tente novamente.')
+  }
+}
+
+function sair() {
+  localStorage.removeItem('fin_usuario')
+  usuario = null
+  location.reload()
+}
+
+// ── EDITAR PERFIL ──
+function abrirPerfil() {
+  if (!usuario) return
+  document.getElementById('ep-nome').value = usuario.nome || ''
+  document.getElementById('ep-sal').value = String(usuario.salario || 0).replace('.', ',')
+  document.getElementById('ep-cel').value = usuario.telefone || ''
+  document.getElementById('ep-pin-atual').value = ''
+  document.getElementById('ep-pin').value = ''
+  document.getElementById('ep-pin-erro').style.display = 'none'
+  document.getElementById('modal-perfil').style.display = 'flex'
+}
+
+async function salvarPerfil() {
+  const nome = document.getElementById('ep-nome').value.trim()
+  const salario = parseBRL(document.getElementById('ep-sal').value)
+  const telefone = document.getElementById('ep-cel').value.trim()
+  const pinAtual = document.getElementById('ep-pin-atual').value.trim()
+  const pinNovo = document.getElementById('ep-pin').value.trim()
+
+  if (!nome) { alert('Informe o nome!'); return }
+  if (pinNovo && !/^\d{4}$/.test(pinNovo)) { alert('Novo PIN deve ter exatamente 4 dígitos!'); return }
+  if (pinNovo && !pinAtual) { alert('Informe o PIN atual para trocar!'); return }
+
+  const body = { nome, salario, telefone }
+  if (pinNovo) { body.pin = pinNovo; body.pinAtual = pinAtual }
+
+  const res = await api(`/usuarios/${usuario.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+
+  if (res.erro) {
+    document.getElementById('ep-pin-erro').style.display = 'block'
+    document.getElementById('ep-pin-atual').value = ''
+    return
+  }
+
+  usuario = { ...usuario, ...res, id: Number(res.id) }
+  localStorage.setItem('fin_usuario', JSON.stringify(usuario))
+  fecharModal('modal-perfil')
+  document.getElementById('h-nome').textContent = usuario.nome + ' ✏️'
+  carregarInicio()
+}
+
+// ── APP ──
+async function mostrarApp() {
+  show('app')
+  const usuarios = await api('/usuarios')
+  const idx = usuarios.findIndex(u => u.id === usuario.id)
+  document.getElementById('h-avatar').textContent = AVATARES[idx] || '👤'
+  document.getElementById('h-saudacao').textContent = SAUDACOES() + ','
+  document.getElementById('h-nome').textContent = usuario.nome + ' ✏️'
+
+  carregarInicio()
+  addMsgBot(`${SAUDACOES()}, ${usuario.nome}! 👋\n\nDigite um gasto aqui. Exemplos:\n• "Mercado R$150"\n• "Gasolina R$80 débito"\n• "Farmácia R$45 Nubank"\n\nOu mande "ajuda" para ver todos os comandos.`)
+}
+
+// ── INÍCIO ──
+async function carregarInicio() {
+  const resumo = await api('/resumo')
+  const gastos = await api('/gastos/recentes')
+
+  // Balance
+  const saldo = resumo.salarioTotal - resumo.gastosMes
+  const pct = resumo.salarioTotal > 0 ? ((resumo.gastosMes/resumo.salarioTotal)*100).toFixed(0) : 0
+  document.getElementById('b-saldo').textContent = fmt(saldo)
+  document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal)
+  document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes)
+  document.getElementById('b-contas').textContent = fmt(resumo.saldoContas)
+  document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
+  const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
+  const dividas = resumo.totalEmDividas > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
+  document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
+
+  // Cartões
+  renderCartoesScroll(resumo.cartoes)
+
+  // Contas
+  renderContasRow(resumo.contas)
+
+  // Empréstimos
+  renderEmprestimos()
+
+  // Evolução mini
+  renderEvolucaoMini(resumo.evolucao)
+
+  // Transações
+  renderTransacoes(gastos.slice(0,8))
+
+  // Alertas de vencimento
+  verificarAlertas()
+}
+
+// ── ALERTAS ──
+async function verificarAlertas() {
+  try {
+    const alertas = await api('/alertas')
+    const banner = document.getElementById('alertas-banner')
+    if (!alertas || !alertas.length) { banner.style.display = 'none'; return }
+    banner.style.display = 'block'
+    const hoje = new Date(); hoje.setHours(0,0,0,0)
+    banner.innerHTML = '<div class="alerta-titulo">🔔 Vencimentos próximos</div>' +
+      alertas.map(e => {
+        const venc = new Date(e.data_vencimento + 'T00:00:00')
+        const diff = Math.round((venc - hoje) / (1000*60*60*24))
+        const tag = diff < 0 ? '🔴 VENCIDO' : diff === 0 ? '🟠 Vence HOJE' : `🟡 ${diff} dia${diff>1?'s':''}`
+        return `<div class="alerta-item" onclick="abrirModalEmprestimo()" style="cursor:pointer">
+          ${tag} — <strong>${e.descricao}</strong> · ${fmt(Number(e.parcela_mensal))}
+        </div>`
+      }).join('')
+  } catch(e) {}
+}
+
+// ── EVOLUÇÃO MINI ──
+function renderEvolucaoMini(evolucao) {
+  const el = document.getElementById('evolucao-mini')
+  if (!el) return
+  if (!evolucao || !evolucao.length) {
+    el.innerHTML = '<div class="evol-vazio">Nenhum gasto registrado ainda.</div>'
+    return
+  }
+  const meses = [...evolucao].reverse()
+  const max = Math.max(...meses.map(m => m.total), 1)
+  const nomeMes = m => {
+    const [,n] = m.mes.split('-')
+    return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(n)-1]
+  }
+  el.innerHTML = `
+    <div class="evol-bars">
+      ${meses.map(m => {
+        const pct = Math.max((m.total / max) * 100, 3)
+        const atual = m.mes === new Date().toISOString().slice(0,7)
+        return `<div class="evol-bar-wrap">
+          <div class="evol-valor">${fmt(m.total).replace('R$ ','')}</div>
+          <div class="evol-bar ${atual?'atual':''}" style="height:${pct}%"></div>
+          <div class="evol-mes">${nomeMes(m)}</div>
+        </div>`
+      }).join('')}
+    </div>
+  `
+}
+
+// ── RELATÓRIO COMPLETO ──
+let chartEvolucao = null, chartCats2 = null
+
+async function abrirRelatorio() {
+  document.getElementById('modal-relatorio').style.display = 'flex'
+  document.getElementById('relatorio-conteudo').innerHTML =
+    '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
+
+  const [evolucao, cats] = await Promise.all([api('/gastos/evolucao'), api('/gastos/categorias')])
+  const meses = [...(evolucao||[])].reverse()
+  const nomeMes = m => {
+    const [,n] = m.mes.split('-')
+    return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(n)-1]
+  }
+
+  document.getElementById('relatorio-conteudo').innerHTML = `
+    <div class="rel-secao">
+      <div class="rel-titulo">Gastos dos últimos 6 meses</div>
+      <canvas id="chart-evolucao" style="max-height:200px"></canvas>
+    </div>
+    <div class="rel-secao">
+      <div class="rel-titulo">Por categoria — mês atual</div>
+      ${cats.length ? `<canvas id="chart-cats" style="max-height:180px;margin-bottom:12px"></canvas>
+      <div id="rel-cat-lista" class="cat-lista"></div>` : '<p style="color:#94a3b8;font-size:.88rem">Nenhum gasto lançado este mês.</p>'}
+    </div>
+  `
+
+  // Gráfico de barras — evolução
+  if (chartEvolucao) chartEvolucao.destroy()
+  const cores6 = meses.map(m => m.mes === new Date().toISOString().slice(0,7) ? '#2563eb' : '#93c5fd')
+  chartEvolucao = new Chart(document.getElementById('chart-evolucao').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: meses.map(nomeMes),
+      datasets: [{ data: meses.map(m => m.total), backgroundColor: cores6, borderRadius: 8, borderSkipped: false }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid: { color: '#f1f5f9' }, ticks: { callback: v => 'R$' + (v/1000).toFixed(0) + 'k' } },
+        x: { grid: { display: false } }
+      }
+    }
+  })
+
+  // Gráfico de rosca — categorias
+  if (cats.length) {
+    if (chartCats2) chartCats2.destroy()
+    const coresCat = ['#16a34a','#dc2626','#2563eb','#d97706','#7c3aed','#0891b2','#db2777','#65a30d']
+    chartCats2 = new Chart(document.getElementById('chart-cats').getContext('2d'), {
+      type: 'doughnut',
+      data: { labels: cats.map(c=>c.categoria), datasets: [{ data: cats.map(c=>c.total), backgroundColor: coresCat, borderWidth: 0, hoverOffset: 6 }] },
+      options: { responsive: true, cutout: '65%', plugins: { legend: { display: false } } }
+    })
+    const total = cats.reduce((a,c) => a+c.total, 0)
+    document.getElementById('rel-cat-lista').innerHTML = cats.map((c,i) => `
+      <div class="cat-item">
+        <div style="width:10px;height:10px;border-radius:50%;background:${coresCat[i%coresCat.length]};flex-shrink:0"></div>
+        <span>${EMOJI_CAT[c.categoria]||'📦'}</span>
+        <span class="cat-nome">${c.categoria}</span>
+        <span class="cat-valor">${fmt(c.total)}</span>
+        <span class="cat-pct">${total>0?((c.total/total)*100).toFixed(0):0}%</span>
+      </div>`).join('')
+  }
+}
+
+function renderCartoesScroll(cartoes) {
+  const el = document.getElementById('inicio-cartoes')
+  if (!cartoes.length) {
+    el.innerHTML = `<div class="cartao-vazio" onclick="mostrarAba('cartoes');navBtn('nav-cartoes')"><span>＋</span>Adicionar cartão</div>`
+    return
+  }
+  el.innerHTML = cartoes.map(c => {
+    const pct = c.limite > 0 ? Math.min((c.gasto_atual/c.limite)*100,100) : 0
+    const disp = c.limite - c.gasto_atual
+    const cJson = encodeURIComponent(JSON.stringify(c))
+    return `
+      <div class="cartao-visual" style="background:linear-gradient(135deg,${c.cor1||'#1a1a2e'},${c.cor2||'#16213e'})"
+           onclick="abrirFaturaCartao(JSON.parse(decodeURIComponent('${cJson}')))">
+        <div class="cv-nome">💳 ${c.nome} <span style="font-size:.7rem;opacity:.7">✏️ editar fatura</span></div>
+        <div class="cv-bottom">
+          <div class="cv-limite">Limite ${fmt(c.limite)}</div>
+          <div class="cv-valores">
+            <div class="cv-gasto">${fmt(c.gasto_atual)}</div>
+            <div class="cv-disp">Disponível<br><strong>${fmt(disp)}</strong></div>
+          </div>
+          <div class="cv-barra"><div class="cv-barra-fill" style="width:${pct}%"></div></div>
+        </div>
+      </div>
+    `
+  }).join('') + `<div class="cartao-vazio" onclick="abrirModalCartao()"><span>＋</span>Novo cartão</div>`
+}
+
+function renderContasRow(contas) {
+  const cores = ['#2563eb','#16a34a','#7c3aed','#d97706','#dc2626']
+  const el = document.getElementById('inicio-contas')
+  if (!contas.length) {
+    el.innerHTML = `<div class="conta-vazia" onclick="abrirModalConta()"><span>＋</span> Adicionar conta</div>`
+    return
+  }
+  el.innerHTML = contas.map((c,i) => {
+    const negativo = c.saldo < 0
+    const corSaldo = negativo ? '#dc2626' : '#16a34a'
+    const corBorda = negativo ? '#dc2626' : cores[i%cores.length]
+    const prefixo = negativo ? '⚠️ ' : ''
+    const contaJson = encodeURIComponent(JSON.stringify(c))
+    return `
+    <div class="conta-chip" style="border-left-color:${corBorda}" onclick="abrirEditarConta(JSON.parse(decodeURIComponent('${contaJson}')))">
+      <div class="conta-chip-nome">${c.nome} ✏️</div>
+      <div class="conta-chip-banco">${c.banco || c.tipo}</div>
+      <div class="conta-chip-saldo" style="color:${corSaldo}">${prefixo}${fmt(c.saldo)}</div>
+    </div>`
+  }).join('') + `<div class="conta-vazia" onclick="abrirModalConta()"><span>＋</span> Nova conta</div>`
+}
+
+function renderTransacoes(gastos) {
+  const el = document.getElementById('inicio-transacoes')
+  if (!gastos.length) {
+    el.innerHTML = `<div class="tx-vazio">📭 Nenhum gasto ainda.<br>Lance pelo chat!</div>`
+    return
+  }
+  el.innerHTML = gastos.map(g => {
+    const data = new Date(g.data_gasto+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})
+    const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
+    return `
+      <div class="tx-item">
+        <div class="tx-emoji">${EMOJI_CAT[g.categoria]||'📦'}</div>
+        <div class="tx-info">
+          <div class="tx-desc">${g.descricao}</div>
+          <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
+        </div>
+        <div class="tx-valor">- ${fmt(g.valor)}</div>
+      </div>
+    `
+  }).join('')
+}
+
+// ── CHAT ──
+function chipGasto(texto) {
+  document.getElementById('chat-input').value = texto
+  document.getElementById('chat-input').focus()
+}
+
+function irParaChat() {
+  mostrarAba('gastos')
+  navBtn('nav-gastos')
+  setTimeout(() => document.getElementById('chat-input').focus(), 300)
+}
+
+async function enviarMsg() {
+  const input = document.getElementById('chat-input')
+  const texto = input.value.trim()
+  if (!texto) return
+  input.value = ''
+
+  addMsgUser(texto)
+  const loading = addLoading()
+
+  try {
+    const res = await api('/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mensagem:texto, usuarioId:usuario.id})
+    })
+    loading.remove()
+    addMsgBot(res.resposta || '❌ Sem resposta.')
+    if (res.tipo === 'gasto') carregarInicio()
+  } catch {
+    loading.remove()
+    addMsgBot('❌ Erro de conexão. Tente novamente.')
+  }
+}
+
+function addMsgUser(txt) {
+  const d = document.createElement('div')
+  d.className = 'msg-user'
+  d.textContent = txt
+  appendChat(d)
+}
+function addMsgBot(txt) {
+  const d = document.createElement('div')
+  d.className = 'msg-bot'
+  d.textContent = txt
+  appendChat(d)
+}
+function addLoading() {
+  const d = document.createElement('div')
+  d.className = 'msg-loading'
+  d.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>'
+  appendChat(d)
+  return d
+}
+function appendChat(el) {
+  const c = document.getElementById('chat-msgs')
+  c.appendChild(el)
+  c.scrollTop = c.scrollHeight
+}
+
+// ── METAS ──
+async function carregarMetas() {
+  const [metas, resumo] = await Promise.all([api('/metas'), api('/resumo')])
+
+  // Resumo financeiro do planejamento
+  const economia = resumo.salarioTotal - resumo.gastosMes
+  document.getElementById('plan-resumo').innerHTML = `
+    <div style="color:#e2e8f0;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💡 Visão do Planejamento</div>
+    <div class="plan-resumo-grid">
+      <div class="plan-item">
+        <div class="plan-item-label">Renda do casal</div>
+        <div class="plan-item-valor">${fmt(resumo.salarioTotal)}</div>
+      </div>
+      <div class="plan-item">
+        <div class="plan-item-label">Gastos do mês</div>
+        <div class="plan-item-valor">${fmt(resumo.gastosMes)}</div>
+      </div>
+      <div class="plan-item">
+        <div class="plan-item-label">Economia possível</div>
+        <div class="plan-item-valor" style="color:#4ade80">${fmt(economia)}</div>
+      </div>
+      <div class="plan-item">
+        <div class="plan-item-label">Metas ativas</div>
+        <div class="plan-item-valor">${metas.length}</div>
+      </div>
+    </div>
+  `
+
+  const el = document.getElementById('metas-lista')
+  if (!metas.length) {
+    el.innerHTML = `
+      <div class="meta-vazio">
+        <div class="meta-vazio-icon">🎯</div>
+        <p>Nenhuma meta ainda.<br>Crie sua primeira meta abaixo!</p>
+      </div>
+    `
+    return
+  }
+  el.innerHTML = metas.map(m => {
+    const pct = m.valor_alvo > 0 ? Math.min((m.valor_atual/m.valor_alvo)*100,100) : 0
+    const prazo = m.prazo ? new Date(m.prazo+'T00:00:00').toLocaleDateString('pt-BR') : 'Sem prazo'
+    const faltam = m.valor_alvo - m.valor_atual
+    return `
+      <div class="meta-card">
+        <div class="meta-top">
+          <div class="meta-emoji">${m.emoji||'🎯'}</div>
+          <div class="meta-info">
+            <div class="meta-nome">${m.nome}</div>
+            <div class="meta-prazo">📅 ${prazo}</div>
+          </div>
+          <div class="meta-pct-badge">${pct.toFixed(0)}%</div>
+        </div>
+        <div class="meta-barra"><div class="meta-barra-fill" style="width:${pct}%"></div></div>
+        <div class="meta-valores">
+          <span>Guardado: ${fmt(m.valor_atual)}</span>
+          <span>Faltam: ${fmt(faltam)}</span>
+        </div>
+      </div>
+    `
+  }).join('')
+}
+
+// ── CARTÕES ──
+async function carregarCartoes() {
+  const [cartoes, cats] = await Promise.all([api('/cartoes'), api('/gastos/categorias')])
+
+  const el = document.getElementById('cartoes-full')
+  if (!cartoes.length) {
+    el.innerHTML = `<div class="vazio">💳 Nenhum cartão cadastrado ainda.</div>`
+  } else {
+    el.innerHTML = cartoes.map(c => {
+      const pct = c.limite > 0 ? Math.min((c.gasto_atual/c.limite)*100,100) : 0
+      const disp = c.limite - c.gasto_atual
+      const alerta = pct > 80 ? '⚠️ ' : ''
+      const cfJson = encodeURIComponent(JSON.stringify(c))
+      return `
+        <div class="cartao-full" style="background:linear-gradient(135deg,${c.cor1||'#1a1a2e'},${c.cor2||'#16213e'});cursor:pointer"
+             onclick="abrirFaturaCartao(JSON.parse(decodeURIComponent('${cfJson}')))">
+          <div class="cf-top">
+            <div>
+              <div class="cf-nome">${alerta}💳 ${c.nome}</div>
+              <div class="cf-usuario">👤 ${c.usuario_nome} · Toque para editar fatura</div>
+            </div>
+            <div class="cf-bandeira">${c.bandeira||'Visa'}</div>
+          </div>
+          <div class="cf-barra"><div class="cf-barra-fill" style="width:${pct}%"></div></div>
+          <div class="cf-bottom">
+            <div>
+              <div class="cf-label">Gasto este mês</div>
+              <div class="cf-valor">${fmt(c.gasto_atual)}</div>
+            </div>
+            <div class="cf-disp">
+              <div class="cf-label">Disponível</div>
+              <div class="cf-valor">${fmt(disp)}</div>
+            </div>
+            <div>
+              <div class="cf-label">Limite total</div>
+              <div class="cf-valor">${fmt(c.limite)}</div>
+            </div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  // Gráfico categorias
+  if (cats.length) {
+    const ctx = document.getElementById('grafico-cat').getContext('2d')
+    if (graficoInstance) graficoInstance.destroy()
+    const cores = ['#16a34a','#dc2626','#2563eb','#d97706','#7c3aed','#0891b2','#db2777','#65a30d']
+    graficoInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: cats.map(c=>c.categoria), datasets: [{ data: cats.map(c=>c.total), backgroundColor: cores, borderWidth: 0, hoverOffset: 6 }] },
+      options: { responsive: true, cutout: '65%', plugins: { legend: { display: false } } }
+    })
+    const total = cats.reduce((a,c) => a+c.total, 0)
+    document.getElementById('cat-lista').innerHTML = cats.map((c,i) => `
+      <div class="cat-item">
+        <div style="width:10px;height:10px;border-radius:50%;background:${cores[i%cores.length]};flex-shrink:0"></div>
+        <span>${EMOJI_CAT[c.categoria]||'📦'}</span>
+        <span class="cat-nome">${c.categoria}</span>
+        <span class="cat-valor">${fmt(c.total)}</span>
+        <span class="cat-pct">${total>0?((c.total/total)*100).toFixed(0):0}%</span>
+      </div>
+    `).join('')
+  }
+}
+
+// ── ABAS ──
+function mostrarAba(nome) {
+  document.querySelectorAll('.aba').forEach(a => a.style.display = 'none')
+  document.getElementById('aba-' + nome).style.display = 'block'
+  if (nome === 'inicio') carregarInicio()
+  if (nome === 'metas') carregarMetas()
+  if (nome === 'cartoes') carregarCartoes()
+  document.getElementById('app-main').scrollTop = 0
+}
+
+function navBtn(id) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'))
+  document.getElementById(id).classList.add('active')
+}
+
+// ── MODAIS ──
+function abrirModalMeta() { document.getElementById('modal-meta').style.display = 'flex' }
+function abrirModalCartao() { document.getElementById('modal-cartao').style.display = 'flex' }
+function abrirModalConta() { document.getElementById('modal-conta').style.display = 'flex' }
+function fecharModal(id) { document.getElementById(id).style.display = 'none' }
+
+// ── EDITAR CONTA ──
+let contaEditandoId = null
+function abrirEditarConta(conta) {
+  contaEditandoId = conta.id
+  document.getElementById('ec-nome').value = conta.nome
+  document.getElementById('ec-banco').value = conta.banco || ''
+  document.getElementById('ec-tipo').value = conta.tipo || 'corrente'
+  document.getElementById('ec-saldo').value = String(conta.saldo).replace('.', ',')
+  document.getElementById('modal-editar-conta').style.display = 'flex'
+}
+async function salvarEdicaoConta() {
+  const nome = document.getElementById('ec-nome').value.trim()
+  const banco = document.getElementById('ec-banco').value.trim()
+  const tipo = document.getElementById('ec-tipo').value
+  const saldo = parseBRL(document.getElementById('ec-saldo').value)
+  if (!nome) { alert('Informe o nome!'); return }
+  await api(`/contas/${contaEditandoId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, banco, tipo, saldo })
+  })
+  fecharModal('modal-editar-conta')
+  carregarInicio()
+}
+async function deletarContaAtual() {
+  if (!confirm('Excluir esta conta?')) return
+  await api(`/contas/${contaEditandoId}`, { method: 'DELETE' })
+  fecharModal('modal-editar-conta')
+  carregarInicio()
+}
+
+// ── EDITAR FATURA CARTÃO ──
+let cartaoEditandoId = null
+function abrirFaturaCartao(cartao) {
+  cartaoEditandoId = cartao.id
+  const disp = cartao.limite - cartao.gasto_atual
+  document.getElementById('fatura-titulo').textContent = `💳 ${cartao.nome}`
+  document.getElementById('fatura-desc').textContent = `Atualize o valor atual da fatura de ${cartao.usuario_nome}`
+  document.getElementById('fatura-valor').value = String(cartao.gasto_atual).replace('.', ',')
+  document.getElementById('fatura-limite-info').innerHTML =
+    `<strong>Limite:</strong> ${fmt(cartao.limite)}<br>
+     <strong>Disponível atual:</strong> <span style="color:${disp < 0 ? '#dc2626' : '#16a34a'}">${fmt(disp)}</span>`
+  document.getElementById('modal-fatura').style.display = 'flex'
+}
+async function salvarFatura() {
+  const gastoAtual = parseBRL(document.getElementById('fatura-valor').value)
+  await api(`/cartoes/${cartaoEditandoId}/fatura`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gastoAtual })
+  })
+  fecharModal('modal-fatura')
+  carregarInicio()
+  carregarCartoes()
+}
+async function deletarCartaoAtual() {
+  if (!confirm('Excluir este cartão?')) return
+  await api(`/cartoes/${cartaoEditandoId}`, { method: 'DELETE' })
+  fecharModal('modal-fatura')
+  carregarInicio()
+  carregarCartoes()
+}
+
+function selEmoji(btn, emoji) {
+  document.querySelectorAll('.emoji-opt').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  metaEmojiSel = emoji
+}
+
+async function salvarMeta() {
+  const nome = document.getElementById('m-nome').value.trim()
+  const valorAlvo = parseBRL(document.getElementById('m-valor').value)
+  const prazo = document.getElementById('m-prazo').value || null
+  if (!nome || !valorAlvo) { alert('Preencha nome e valor!'); return }
+  await api('/metas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,valorAlvo,prazo,emoji:metaEmojiSel})})
+  fecharModal('modal-meta')
+  document.getElementById('m-nome').value = ''
+  document.getElementById('m-valor').value = ''
+  document.getElementById('m-prazo').value = ''
+  carregarMetas()
+}
+
+async function salvarCartao() {
+  const nome = document.getElementById('c-nome').value.trim()
+  const limite = parseBRL(document.getElementById('c-limite').value)
+  const diaFechamento = parseInt(document.getElementById('c-fecha').value) || 1
+  const diaVencimento = parseInt(document.getElementById('c-vence').value) || 10
+  if (!nome || !limite) { alert('Preencha nome e limite!'); return }
+  await api('/cartoes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:usuario.id,nome,limite,diaFechamento,diaVencimento})})
+  fecharModal('modal-cartao')
+  document.getElementById('c-nome').value = ''
+  document.getElementById('c-limite').value = ''
+  carregarInicio()
+  carregarCartoes()
+}
+
+async function salvarConta() {
+  const nome = document.getElementById('ct-nome').value.trim()
+  const banco = document.getElementById('ct-banco').value.trim()
+  const tipo = document.getElementById('ct-tipo').value
+  const saldo = parseBRL(document.getElementById('ct-saldo').value)
+  if (!nome) { alert('Informe o nome da conta!'); return }
+  await api('/contas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:usuario.id,nome,banco,tipo,saldo})})
+  fecharModal('modal-conta')
+  document.getElementById('ct-nome').value = ''
+  document.getElementById('ct-banco').value = ''
+  document.getElementById('ct-saldo').value = ''
+  carregarInicio()
+}
+
+// ── EMPRÉSTIMOS ──
+let empEdicaoId = null
+const TIPO_EMOJI = { emprestimo: '💸', casa: '🏠', carro: '🚗', outro: '📦' }
+const TIPO_LABEL = { emprestimo: 'Empréstimo Pessoal', casa: 'Financiamento Casa', carro: 'Financiamento Carro', outro: 'Outra Dívida' }
+const TIPO_COR   = { emprestimo: '#dc2626', casa: '#7c3aed', carro: '#2563eb', outro: '#d97706' }
+
+function selTipo(btn, tipo) {
+  document.querySelectorAll('.tipo-btn').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  document.getElementById('emp-tipo-val').value = tipo
+}
+
+function abrirModalEmprestimo(emp = null) {
+  empEdicaoId = emp ? Number(emp.id) : null
+  const tipo = emp?.tipo || 'emprestimo'
+
+  document.getElementById('emp-btn-excluir').style.display = emp ? 'block' : 'none'
+  document.getElementById('emp-descricao').value = emp?.descricao || ''
+  document.getElementById('emp-credor').value = emp?.credor || ''
+  document.getElementById('emp-total').value = emp ? String(Number(emp.valor_total)).replace('.', ',') : ''
+  document.getElementById('emp-parcela').value = emp ? String(Number(emp.parcela_mensal)).replace('.', ',') : ''
+  document.getElementById('emp-nparcelas').value = emp?.total_parcelas || ''
+  document.getElementById('emp-juros').value = emp ? String(Number(emp.taxa_juros)).replace('.', ',') : ''
+  document.getElementById('emp-vencimento').value = emp?.data_vencimento || ''
+  document.getElementById('emp-pago').value = emp ? String(Number(emp.valor_pago)).replace('.', ',') : ''
+
+  // Selecionar o tipo correto
+  document.querySelectorAll('.tipo-btn').forEach(b => {
+    b.classList.toggle('sel', b.dataset.tipo === tipo)
+  })
+  document.getElementById('emp-tipo-val').value = tipo
+  document.getElementById('modal-emprestimo').style.display = 'flex'
+}
+
+async function salvarEmprestimo() {
+  const tipo = document.getElementById('emp-tipo-val').value || 'emprestimo'
+  const descricao = document.getElementById('emp-descricao').value.trim()
+  const credor = document.getElementById('emp-credor').value.trim()
+  const valorTotal = parseBRL(document.getElementById('emp-total').value)
+  const parcelaMensal = parseBRL(document.getElementById('emp-parcela').value)
+  const totalParcelas = parseInt(document.getElementById('emp-nparcelas').value) || 1
+  const taxaJuros = parseBRL(document.getElementById('emp-juros').value)
+  const dataVencimento = document.getElementById('emp-vencimento').value || null
+  const valorPago = parseBRL(document.getElementById('emp-pago').value)
+  const parcelasPagas = valorPago > 0 && parcelaMensal > 0 ? Math.floor(valorPago / parcelaMensal) : 0
+
+  if (!descricao || !credor || !valorTotal) { alert('Preencha descrição, credor e valor total!'); return }
+
+  if (empEdicaoId) {
+    await api(`/emprestimos/${empEdicaoId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas })
+    })
+  } else {
+    await api('/emprestimos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento })
+    })
+    if (valorPago > 0) {
+      const criado = await api('/emprestimos').then(list => list[0])
+      if (criado) await api(`/emprestimos/${criado.id}/pagar`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valorPago, parcelasPagas })
+      })
+    }
+  }
+
+  fecharModal('modal-emprestimo')
+  renderEmprestimos()
+}
+
+async function deletarEmprestimoAtual() {
+  if (!confirm('Excluir este empréstimo?')) return
+  await api(`/emprestimos/${empEdicaoId}`, { method: 'DELETE' })
+  fecharModal('modal-emprestimo')
+  renderEmprestimos()
+}
+
+async function renderEmprestimos() {
+  const emprestimos = await api('/emprestimos')
+  const el = document.getElementById('inicio-emprestimos')
+  if (!el) return
+
+  if (!emprestimos.length) {
+    el.innerHTML = `<div class="emp-vazio" onclick="abrirModalEmprestimo()">✅ Nenhum empréstimo em aberto.<br><span style="font-size:.8rem">+ Cadastrar empréstimo</span></div>`
+    return
+  }
+
+  el.innerHTML = emprestimos.map(e => {
+    const pago = Number(e.valor_pago)
+    const total = Number(e.valor_total)
+    const restante = total - pago
+    const pct = total > 0 ? Math.min((pago / total) * 100, 100) : 0
+    const eJson = encodeURIComponent(JSON.stringify(e))
+    const venc = e.data_vencimento ? new Date(e.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
+    const tipo = e.tipo || 'emprestimo'
+    const emoji = TIPO_EMOJI[tipo] || '💸'
+    const label = TIPO_LABEL[tipo] || 'Dívida'
+    const cor = TIPO_COR[tipo] || '#dc2626'
+    return `
+      <div class="emp-card" style="border-left-color:${cor}" onclick="abrirModalEmprestimo(JSON.parse(decodeURIComponent('${eJson}')))">
+        <div class="emp-top">
+          <div>
+            <div class="emp-desc">${emoji} ${e.descricao}</div>
+            <div class="emp-credor">${label} · ${e.credor} · ${e.usuario_nome}</div>
+          </div>
+          <div class="emp-badge">Faltam ${fmt(restante)}</div>
+        </div>
+        <div class="emp-barra"><div class="emp-barra-fill" style="width:${pct}%"></div></div>
+        <div class="emp-bottom">
+          <div class="emp-item">
+            <div class="emp-item-label">Total</div>
+            <div class="emp-item-valor">${fmt(total)}</div>
+          </div>
+          <div class="emp-item">
+            <div class="emp-item-label">Parcela</div>
+            <div class="emp-item-valor">${fmt(Number(e.parcela_mensal))}</div>
+          </div>
+          <div class="emp-item">
+            <div class="emp-item-label">Vence</div>
+            <div class="emp-item-valor" style="font-size:.78rem">${venc}</div>
+          </div>
+        </div>
+      </div>`
+  }).join('')
+}
+
+// ── PLANO IA ──
+async function abrirPlano() {
+  document.getElementById('modal-plano').style.display = 'flex'
+  document.getElementById('plano-conteudo').innerHTML = `
+    <div class="plano-loading">
+      <div class="spinner"></div>
+      <p>Analisando suas finanças...</p>
+    </div>
+  `
+  try {
+    const { plano } = await api('/plano')
+    document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">${plano}</div>`
+  } catch {
+    document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">❌ Erro ao gerar plano. Tente novamente.</div>`
+  }
+}
+
+// ── START ──
+init()

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check \"C:\\\\CLAUDE PROJETOS\\\\Controle Financeiro_Ed e Leide\\\\public\\\\app.js\")"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "controle-financeiro",
+  "version": "1.0.0",
+  "description": "Controle financeiro familiar — Ed & Leide",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "express": "^4.18.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
