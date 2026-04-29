@@ -220,8 +220,8 @@ function criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcela
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal || 0, totalParcelas || 1, taxaJuros || 0, dataVencimento || null)
 }
 function listarEmprestimos(usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.usuario_id = ? AND e.status = "ativo" ORDER BY e.criado_em DESC').all(usuarioId)
-  return db.prepare('SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = "ativo" ORDER BY e.criado_em DESC').all()
+  if (usuarioId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.usuario_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(usuarioId)
+  return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = 'ativo' ORDER BY e.criado_em DESC").all()
 }
 function atualizarEmprestimo(id, valorPago, parcelasPagas) {
   const emp = db.prepare('SELECT * FROM emprestimos WHERE id = ?').get(id)
@@ -240,7 +240,7 @@ function deletarEmprestimo(id) {
   return db.prepare('DELETE FROM emprestimos WHERE id = ?').run(id)
 }
 function totalDividas() {
-  const result = db.prepare('SELECT COALESCE(SUM(valor_total - valor_pago), 0) as total FROM emprestimos WHERE status = "ativo"').get()
+  const result = db.prepare("SELECT COALESCE(SUM(valor_total - valor_pago), 0) as total FROM emprestimos WHERE status = 'ativo'").get()
   return Number(result.total)
 }
 
