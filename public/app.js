@@ -354,9 +354,9 @@ async function carregarInicio() {
         ? '⚙️ Configure suas rendas programadas'
         : positivo ? `✅ Economizando (${visaoLabel})` : `⚠️ Acima da renda (${visaoLabel})`
 
-    const rendaLabel = resumo.rendaProgramada > 0 ? 'Renda prev.' : 'Renda'
-    document.querySelector('#b-renda')?.closest('.pill')?.querySelector('.pill-label')
-      && (document.querySelector('#b-renda').closest('.pill').querySelector('.pill-label').textContent = rendaLabel)
+    const rendaLabel = resumo.rendaProgramada > 0 ? 'Entradas prev.' : 'Entradas do mês'
+    const rendaLabelEl = document.getElementById('b-renda-label')
+    if (rendaLabelEl) rendaLabelEl.textContent = rendaLabel
     document.getElementById('b-renda').textContent = fmt(rendaTotal)
     document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
     document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)
