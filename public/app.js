@@ -314,13 +314,22 @@ async function carregarInicio() {
 // ── ALERTAS ──
 async function verificarAlertas() {
   try {
-    const alertas = await api('/alertas')
+    const [alertas, projecao] = await Promise.all([api('/alertas'), api('/projecao')])
     const banner = document.getElementById('alertas-banner')
-    if (!alertas || !alertas.length) { banner.style.display = 'none'; return }
+
+    const temEmpAlerta = alertas && alertas.length > 0
+    const proxMes = projecao && projecao[0]
+    const temParcelas = proxMes && proxMes.total > 0
+
+    if (!temEmpAlerta && !temParcelas) { banner.style.display = 'none'; return }
+
     banner.style.display = 'block'
-    const hoje = new Date(); hoje.setHours(0,0,0,0)
-    banner.innerHTML = '<div class="alerta-titulo">🔔 Vencimentos próximos</div>' +
-      alertas.map(e => {
+    let html = ''
+
+    if (temEmpAlerta) {
+      const hoje = new Date(); hoje.setHours(0,0,0,0)
+      html += '<div class="alerta-titulo">🔔 Vencimentos próximos</div>'
+      html += alertas.map(e => {
         const venc = new Date(e.data_vencimento + 'T00:00:00')
         const diff = Math.round((venc - hoje) / (1000*60*60*24))
         const tag = diff < 0 ? '🔴 VENCIDO' : diff === 0 ? '🟠 Vence HOJE' : `🟡 ${diff} dia${diff>1?'s':''}`
@@ -328,6 +337,22 @@ async function verificarAlertas() {
           ${tag} — <strong>${e.descricao}</strong> · ${fmt(Number(e.parcela_mensal))}
         </div>`
       }).join('')
+    }
+
+    if (temParcelas) {
+      const nomeMes = mesStr => {
+        const [,n] = mesStr.split('-')
+        return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(n)-1]
+      }
+      if (!temEmpAlerta) html += '<div class="alerta-titulo">📅 Parcelas futuras</div>'
+      html += projecao.filter(p => p.total > 0).map(p =>
+        `<div class="alerta-item alerta-parcela">
+          📅 <strong>${nomeMes(p.mes)}</strong> — ${fmt(p.total)} em parcelas comprometidas
+        </div>`
+      ).join('')
+    }
+
+    banner.innerHTML = html
   } catch(e) {}
 }
 
@@ -394,17 +419,37 @@ async function abrirRelatorio() {
   document.getElementById('relatorio-conteudo').innerHTML =
     '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
 
-  const [evolucao, cats] = await Promise.all([api('/gastos/evolucao'), api('/gastos/categorias')])
-  const meses = [...(evolucao||[])].reverse()
-  const nomeMes = m => {
-    const [,n] = m.mes.split('-')
+  const [gastosEv, receitasEv, cats] = await Promise.all([
+    api('/gastos/evolucao'), api('/receitas/evolucao'), api('/gastos/categorias')
+  ])
+
+  const nomeMes = mesStr => {
+    const [,n] = mesStr.split('-')
     return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(n)-1]
   }
 
+  // Merge gastos e receitas pelos mesmos rótulos (últimos 6 meses)
+  const mesAtual = new Date().toISOString().slice(0,7)
+  const allMeses = [...new Set([...(gastosEv||[]).map(m=>m.mes), ...(receitasEv||[]).map(m=>m.mes)])].sort()
+  const ultimos6 = allMeses.slice(-6)
+  const gastosMap = Object.fromEntries((gastosEv||[]).map(m => [m.mes, m.total]))
+  const receitasMap = Object.fromEntries((receitasEv||[]).map(m => [m.mes, m.total]))
+
+  // Calcula balanço mensal
+  const balancoPorMes = ultimos6.map(m => {
+    const g = gastosMap[m] || 0
+    const r = receitasMap[m] || 0
+    return { mes: m, gastos: g, receitas: r, saldo: r - g }
+  })
+
   document.getElementById('relatorio-conteudo').innerHTML = `
     <div class="rel-secao">
-      <div class="rel-titulo">Gastos dos últimos 6 meses</div>
-      <canvas id="chart-evolucao" style="max-height:200px"></canvas>
+      <div class="rel-titulo">Receitas vs Gastos — últimos 6 meses</div>
+      <canvas id="chart-evolucao" style="max-height:220px"></canvas>
+    </div>
+    <div class="rel-secao">
+      <div class="rel-titulo">Balanço mensal</div>
+      <div id="rel-balanco" class="rel-balanco"></div>
     </div>
     <div class="rel-secao">
       <div class="rel-titulo">Por categoria — mês atual</div>
@@ -413,24 +458,36 @@ async function abrirRelatorio() {
     </div>
   `
 
-  // Gráfico de barras — evolução
+  // Gráfico grouped — receitas vs gastos
   if (chartEvolucao) chartEvolucao.destroy()
-  const cores6 = meses.map(m => m.mes === new Date().toISOString().slice(0,7) ? '#2563eb' : '#93c5fd')
   chartEvolucao = new Chart(document.getElementById('chart-evolucao').getContext('2d'), {
     type: 'bar',
     data: {
-      labels: meses.map(nomeMes),
-      datasets: [{ data: meses.map(m => m.total), backgroundColor: cores6, borderRadius: 8, borderSkipped: false }]
+      labels: ultimos6.map(nomeMes),
+      datasets: [
+        { label: 'Receitas', data: ultimos6.map(m => receitasMap[m] || 0), backgroundColor: '#22c55e', borderRadius: 6, borderSkipped: false },
+        { label: 'Gastos',   data: ultimos6.map(m => gastosMap[m] || 0),   backgroundColor: '#f87171', borderRadius: 6, borderSkipped: false }
+      ]
     },
     options: {
       responsive: true,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
       scales: {
         y: { grid: { color: '#f1f5f9' }, ticks: { callback: v => 'R$' + (v/1000).toFixed(0) + 'k' } },
         x: { grid: { display: false } }
       }
     }
   })
+
+  // Balanço
+  document.getElementById('rel-balanco').innerHTML = balancoPorMes.map(b => {
+    const pos = b.saldo >= 0
+    const atual = b.mes === mesAtual
+    return `<div class="rel-balanco-item${atual ? ' atual' : ''}">
+      <span class="rel-balanco-mes">${nomeMes(b.mes)}${atual ? ' ←' : ''}</span>
+      <span class="rel-balanco-saldo" style="color:${pos?'#16a34a':'#dc2626'}">${pos?'+':''}${fmt(b.saldo)}</span>
+    </div>`
+  }).join('')
 
   // Gráfico de rosca — categorias
   if (cats.length) {
@@ -951,18 +1008,124 @@ async function salvarConta() {
   }
 }
 
+// ── GASTO MANUAL ──
+let gastoFormaSel = 'debito'
+
+async function abrirModalGasto() {
+  document.getElementById('g-descricao').value = ''
+  document.getElementById('g-valor').value = ''
+  document.getElementById('g-parcelas').value = '1'
+  document.getElementById('g-categoria').value = 'Alimentação'
+  // Reseta forma
+  document.querySelectorAll('.forma-btn').forEach(b => b.classList.remove('sel'))
+  document.querySelector('.forma-btn')?.classList.add('sel')
+  gastoFormaSel = 'debito'
+  document.getElementById('g-cartao-row').style.display = 'none'
+
+  // Carrega cartões do usuário
+  try {
+    const cartoes = await api(`/cartoes?usuarioId=${usuario.id}`)
+    const sel = document.getElementById('g-cartao')
+    sel.innerHTML = `<option value="">Sem cartão específico</option>` +
+      cartoes.map(c => `<option value="${c.id}">${c.nome} (disp. ${fmt(c.limite - c.gasto_atual)})</option>`).join('')
+  } catch(e) {}
+
+  document.getElementById('modal-gasto').style.display = 'flex'
+}
+
+function selForma(btn, forma) {
+  document.querySelectorAll('.forma-btn').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  gastoFormaSel = forma
+  document.getElementById('g-forma-val').value = forma
+  // Só mostra cartão/parcelas no crédito
+  document.getElementById('g-cartao-row').style.display = forma === 'credito' ? 'block' : 'none'
+}
+
+async function salvarGastoManual() {
+  const descricao = document.getElementById('g-descricao').value.trim()
+  const valor = parseBRL(document.getElementById('g-valor').value)
+  const categoria = document.getElementById('g-categoria').value
+  const formaPagamento = gastoFormaSel
+  const cartaoId = formaPagamento === 'credito' ? (document.getElementById('g-cartao').value || null) : null
+  const parcelas = formaPagamento === 'credito' ? parseInt(document.getElementById('g-parcelas').value) || 1 : 1
+
+  if (!descricao) { toast('Informe a descrição!', 'erro'); return }
+  if (!valor || valor <= 0) { toast('Informe o valor!', 'erro'); return }
+
+  try {
+    await api('/gastos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, descricao, valor, categoria, formaPagamento, cartaoId, parcelas })
+    })
+    fecharModal('modal-gasto')
+    const parcelaInfo = parcelas > 1 ? ` em ${parcelas}x de ${fmt(valor/parcelas)}` : ''
+    toast(`✅ ${descricao} — ${fmt(valor)}${parcelaInfo} lançado!`)
+    carregarInicio()
+    carregarCartoes()
+  } catch(e) {
+    toast('❌ Erro ao lançar: ' + e.message, 'erro')
+  }
+}
+
 // ── RECEITAS ──
-function abrirModalReceita() {
-  // Preenche data de hoje por padrão
+async function abrirModalReceita() {
   const hoje = new Date().toISOString().split('T')[0]
   document.getElementById('r-data').value = hoje
   document.getElementById('r-descricao').value = ''
   document.getElementById('r-valor').value = ''
-  // Reseta seleção de tipo
   document.querySelectorAll('.rtipo-btn').forEach(b => b.classList.remove('sel'))
   document.querySelector('.rtipo-btn')?.classList.add('sel')
   receitaTipoSel = 'Freelance'
   document.getElementById('modal-receita').style.display = 'flex'
+  await carregarReceitasMes()
+}
+
+async function carregarReceitasMes() {
+  const el = document.getElementById('receitas-mes-lista')
+  if (!el) return
+  try {
+    const receitas = await api(`/receitas?usuarioId=${usuario.id}`)
+    const now = new Date()
+    const mesStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
+    const doMes = receitas.filter(r => r.data_receita?.startsWith(mesStr))
+    if (!doMes.length) {
+      el.innerHTML = `<div class="receitas-mes-titulo">Receitas deste mês</div><div class="receitas-mes-vazio">Nenhuma receita extra lançada ainda.</div>`
+      return
+    }
+    const totalMes = doMes.reduce((a, r) => a + Number(r.valor), 0)
+    el.innerHTML = `
+      <div class="receitas-mes-titulo">Receitas deste mês <span class="receitas-mes-total">${fmt(totalMes)}</span></div>
+      ${doMes.map(r => {
+        const data = new Date(r.data_receita + 'T00:00:00').toLocaleDateString('pt-BR', {day:'2-digit',month:'short'})
+        return `<div class="receita-item">
+          <div class="receita-item-info">
+            <div class="receita-item-desc">💰 ${r.descricao}</div>
+            <div class="receita-item-meta">${r.usuario_nome} · ${data}</div>
+          </div>
+          <div class="receita-item-dir">
+            <span class="receita-item-valor">${fmt(r.valor)}</span>
+            <button class="receita-item-del" onclick="excluirReceita(${r.id})">🗑</button>
+          </div>
+        </div>`
+      }).join('')}
+    `
+  } catch(e) {
+    el.innerHTML = ''
+  }
+}
+
+async function excluirReceita(id) {
+  if (!confirm('Excluir esta receita?')) return
+  try {
+    await api(`/receitas/${id}`, { method: 'DELETE' })
+    toast('🗑️ Receita removida')
+    await carregarReceitasMes()
+    carregarInicio()
+  } catch(e) {
+    toast('❌ Erro ao excluir: ' + e.message, 'erro')
+  }
 }
 
 function selReceitaTipo(btn, tipo) {
@@ -985,8 +1148,10 @@ async function salvarReceita() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ usuarioId: usuario.id, valor, descricao, dataReceita: dataReceita || null })
     })
-    fecharModal('modal-receita')
+    document.getElementById('r-descricao').value = ''
+    document.getElementById('r-valor').value = ''
     toast(`💰 Receita de ${fmt(valor)} registrada!`)
+    await carregarReceitasMes()
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao registrar receita: ' + e.message, 'erro')

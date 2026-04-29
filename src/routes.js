@@ -73,6 +73,25 @@ router.get('/resumo', (req, res) => {
   }
 })
 
+router.post('/gastos', (req, res) => {
+  try {
+    const { usuarioId, descricao, valor, categoria, formaPagamento, cartaoId, parcelas, contaId } = req.body
+    if (!usuarioId || !descricao || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.registrarGasto(
+      parseInt(usuarioId), descricao, valor,
+      categoria || 'Outros', formaPagamento || 'debito',
+      cartaoId ? parseInt(cartaoId) : null,
+      parseInt(parcelas) || 1,
+      contaId ? parseInt(contaId) : null
+    )
+    const id = typeof result === 'number' ? result : Number(result?.lastInsertRowid || 0)
+    res.json({ ok: true, id })
+  } catch (e) {
+    console.error('POST /gastos erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.get('/gastos', (req, res) => {
   try {
     const { mes, ano } = req.query
@@ -229,6 +248,10 @@ router.post('/receitas', (req, res) => {
 router.delete('/receitas/:id', (req, res) => {
   db.deletarReceita(req.params.id)
   res.json({ ok: true })
+})
+
+router.get('/receitas/evolucao', (req, res) => {
+  res.json(db.receitasPorMes(6))
 })
 
 router.get('/projecao', (req, res) => {

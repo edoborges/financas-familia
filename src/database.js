@@ -243,6 +243,9 @@ function totalReceitasMes(usuarioId = null) {
 function deletarReceita(id) {
   return db.prepare('DELETE FROM receitas WHERE id = ?').run(id)
 }
+function receitasPorMes(meses = 6) {
+  return db.prepare(`SELECT strftime('%Y-%m', data_receita) as mes, SUM(valor) as total FROM receitas GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
+}
 
 // ===== PROJEÇÃO =====
 function projecaoGastosMeses(meses = 4) {
@@ -340,7 +343,7 @@ module.exports = {
   criarEmprestimo, listarEmprestimos, atualizarEmprestimo, editarEmprestimo, deletarEmprestimo, totalDividas,
   registrarGasto, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,
-  registrarReceita, listarReceitas, totalReceitasMes, deletarReceita,
+  registrarReceita, listarReceitas, totalReceitasMes, deletarReceita, receitasPorMes,
   projecaoGastosMeses,
   alertasVencimento,
   resumoFinanceiro

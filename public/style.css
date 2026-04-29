@@ -363,6 +363,48 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 }
 .conta-vazia-full span{font-size:2.5rem;display:block;margin-bottom:10px}
 
+/* ── MODAL GASTO — FORMA DE PAGAMENTO ── */
+.forma-selector{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.forma-btn{
+  flex:1;min-width:64px;padding:9px 6px;border:2px solid var(--borda);border-radius:12px;
+  background:#f8fafc;font-size:.78rem;font-weight:600;cursor:pointer;
+  color:var(--sub);transition:all .15s;text-align:center;
+}
+.forma-btn.sel{border-color:var(--azul);background:#eff6ff;color:var(--azul)}
+
+/* ── LISTA DE RECEITAS NO MODAL ── */
+.receitas-mes-lista{margin-top:18px;border-top:1px solid var(--borda);padding-top:14px}
+.receitas-mes-titulo{
+  font-size:.75rem;font-weight:700;color:var(--sub);text-transform:uppercase;
+  letter-spacing:.5px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;
+}
+.receitas-mes-total{color:var(--verde);font-size:.88rem;font-weight:800;text-transform:none;letter-spacing:0}
+.receitas-mes-vazio{font-size:.83rem;color:var(--sub);text-align:center;padding:10px 0}
+.receita-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0;border-bottom:1px solid #f1f5f9;
+}
+.receita-item:last-child{border-bottom:none}
+.receita-item-info{flex:1}
+.receita-item-desc{font-size:.88rem;font-weight:600;color:#0f172a}
+.receita-item-meta{font-size:.75rem;color:var(--sub)}
+.receita-item-dir{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.receita-item-valor{font-size:.9rem;font-weight:700;color:var(--verde)}
+.receita-item-del{background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:.55;transition:opacity .15s}
+.receita-item-del:hover{opacity:1}
+
+/* ── RELATÓRIO BALANÇO ── */
+.rel-balanco{display:flex;flex-direction:column;gap:6px}
+.rel-balanco-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 12px;background:#f8fafc;border-radius:10px;
+  font-size:.88rem;
+}
+.rel-balanco-item.atual{background:#eff6ff;border-left:3px solid var(--azul)}
+.rel-balanco-mes{font-weight:600;color:var(--text)}
+.rel-balanco-saldo{font-weight:800}
+.alerta-parcela{opacity:.9;background:rgba(255,255,255,.08)}
+
 /* ── PROJEÇÃO DE PARCELAS ── */
 .projecao-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;margin-bottom:4px;scrollbar-width:none}
 .projecao-row::-webkit-scrollbar{display:none}
