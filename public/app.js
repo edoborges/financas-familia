@@ -39,6 +39,20 @@ const api = async (url, opts) => {
   return data
 }
 
+// ── TOAST ──
+let _toastTimer = null
+function toast(msg, tipo = 'sucesso') {
+  const el = document.getElementById('toast')
+  if (!el) return
+  clearTimeout(_toastTimer)
+  el.textContent = msg
+  el.className = tipo
+  // força reflow para reiniciar animação
+  void el.offsetWidth
+  el.classList.add('show')
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 3000)
+}
+
 // ── INIT ──
 let USUARIOS_CACHE = []
 
@@ -703,20 +717,30 @@ async function salvarEdicaoConta() {
   const banco = document.getElementById('ec-banco').value.trim()
   const tipo = document.getElementById('ec-tipo').value
   const saldo = parseBRL(document.getElementById('ec-saldo').value)
-  if (!nome) { alert('Informe o nome!'); return }
-  await api(`/contas/${contaEditandoId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nome, banco, tipo, saldo })
-  })
-  fecharModal('modal-editar-conta')
-  carregarInicio()
+  if (!nome) { toast('Informe o nome!', 'erro'); return }
+  try {
+    await api(`/contas/${contaEditandoId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, banco, tipo, saldo })
+    })
+    fecharModal('modal-editar-conta')
+    toast(`✅ Conta "${nome}" atualizada!`)
+    carregarInicio()
+  } catch (e) {
+    toast('❌ Erro ao atualizar conta: ' + e.message, 'erro')
+  }
 }
 async function deletarContaAtual() {
   if (!confirm('Excluir esta conta?')) return
-  await api(`/contas/${contaEditandoId}`, { method: 'DELETE' })
-  fecharModal('modal-editar-conta')
-  carregarInicio()
+  try {
+    await api(`/contas/${contaEditandoId}`, { method: 'DELETE' })
+    fecharModal('modal-editar-conta')
+    toast('🗑️ Conta excluída')
+    carregarInicio()
+  } catch (e) {
+    toast('❌ Erro ao excluir: ' + e.message, 'erro')
+  }
 }
 
 // ── EDITAR FATURA CARTÃO ──
@@ -761,16 +785,17 @@ async function salvarMeta() {
   const nome = document.getElementById('m-nome').value.trim()
   const valorAlvo = parseBRL(document.getElementById('m-valor').value)
   const prazo = document.getElementById('m-prazo').value || null
-  if (!nome || !valorAlvo) { alert('Preencha nome e valor!'); return }
+  if (!nome || !valorAlvo) { toast('Preencha nome e valor!', 'erro'); return }
   try {
     await api('/metas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome, valorAlvo, prazo, emoji: metaEmojiSel }) })
     fecharModal('modal-meta')
     document.getElementById('m-nome').value = ''
     document.getElementById('m-valor').value = ''
     document.getElementById('m-prazo').value = ''
+    toast(`✅ Meta "${nome}" criada!`)
     carregarMetas()
   } catch (e) {
-    alert('Erro ao salvar meta: ' + e.message)
+    toast('❌ Erro ao salvar meta: ' + e.message, 'erro')
   }
 }
 
@@ -779,16 +804,17 @@ async function salvarCartao() {
   const limite = parseBRL(document.getElementById('c-limite').value)
   const diaFechamento = parseInt(document.getElementById('c-fecha').value) || 1
   const diaVencimento = parseInt(document.getElementById('c-vence').value) || 10
-  if (!nome || !limite) { alert('Preencha nome e limite!'); return }
+  if (!nome || !limite) { toast('Preencha nome e limite!', 'erro'); return }
   try {
     await api('/cartoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, limite, diaFechamento, diaVencimento }) })
     fecharModal('modal-cartao')
     document.getElementById('c-nome').value = ''
     document.getElementById('c-limite').value = ''
+    toast(`✅ Cartão "${nome}" adicionado!`)
     carregarInicio()
     carregarCartoes()
   } catch (e) {
-    alert('Erro ao salvar cartão: ' + e.message)
+    toast('❌ Erro ao salvar cartão: ' + e.message, 'erro')
   }
 }
 
@@ -797,16 +823,17 @@ async function salvarConta() {
   const banco = document.getElementById('ct-banco').value.trim()
   const tipo = document.getElementById('ct-tipo').value
   const saldo = parseBRL(document.getElementById('ct-saldo').value)
-  if (!nome) { alert('Informe o nome da conta!'); return }
+  if (!nome) { toast('Informe o nome da conta!', 'erro'); return }
   try {
     await api('/contas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, banco, tipo, saldo }) })
     fecharModal('modal-conta')
     document.getElementById('ct-nome').value = ''
     document.getElementById('ct-banco').value = ''
     document.getElementById('ct-saldo').value = ''
+    toast(`✅ Conta "${nome}" adicionada com sucesso!`)
     carregarInicio()
   } catch (e) {
-    alert('Erro ao salvar conta: ' + e.message)
+    toast('❌ Erro ao salvar conta: ' + e.message, 'erro')
   }
 }
 
@@ -856,29 +883,34 @@ async function salvarEmprestimo() {
   const valorPago = parseBRL(document.getElementById('emp-pago').value)
   const parcelasPagas = valorPago > 0 && parcelaMensal > 0 ? Math.floor(valorPago / parcelaMensal) : 0
 
-  if (!descricao || !credor || !valorTotal) { alert('Preencha descrição, credor e valor total!'); return }
+  if (!descricao || !credor || !valorTotal) { toast('Preencha descrição, credor e valor total!', 'erro'); return }
 
-  if (empEdicaoId) {
-    await api(`/emprestimos/${empEdicaoId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas })
-    })
-  } else {
-    await api('/emprestimos', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuarioId: usuario.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento })
-    })
-    if (valorPago > 0) {
-      const criado = await api('/emprestimos').then(list => list[0])
-      if (criado) await api(`/emprestimos/${criado.id}/pagar`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ valorPago, parcelasPagas })
+  try {
+    if (empEdicaoId) {
+      await api(`/emprestimos/${empEdicaoId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas })
       })
+      toast(`✅ "${descricao}" atualizado!`)
+    } else {
+      await api('/emprestimos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuarioId: usuario.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento })
+      })
+      if (valorPago > 0) {
+        const criado = await api('/emprestimos').then(list => list[0])
+        if (criado) await api(`/emprestimos/${criado.id}/pagar`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ valorPago, parcelasPagas })
+        })
+      }
+      toast(`✅ "${descricao}" cadastrado!`)
     }
+    fecharModal('modal-emprestimo')
+    renderEmprestimos()
+  } catch (e) {
+    toast('❌ Erro ao salvar: ' + e.message, 'erro')
   }
-
-  fecharModal('modal-emprestimo')
-  renderEmprestimos()
 }
 
 async function deletarEmprestimoAtual() {

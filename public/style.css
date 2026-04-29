@@ -319,3 +319,15 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .rel-titulo{font-size:.8rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
 .pin-troca-section{background:#f8fafc;border-radius:12px;padding:14px;margin-bottom:12px}
 .pin-troca-section .input-label{margin-bottom:8px}
+
+/* ── TOAST ── */
+#toast{
+  position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(20px);
+  min-width:220px;max-width:88vw;padding:13px 20px;border-radius:14px;
+  font-size:.93rem;font-weight:600;text-align:center;color:#fff;
+  box-shadow:0 8px 28px rgba(0,0,0,.22);pointer-events:none;
+  opacity:0;transition:opacity .25s,transform .25s;z-index:9999;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.sucesso{background:linear-gradient(135deg,#16a34a,#15803d)}
+#toast.erro{background:linear-gradient(135deg,#dc2626,#b91c1c)}
