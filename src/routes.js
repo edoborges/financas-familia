@@ -58,25 +58,67 @@ function parseCSV(csvText) {
   return registros
 }
 
+// ── Setup de super_admin (chamado uma vez para criar o admin inicial) ──
+router.post('/setup-admin', (req, res) => {
+  try {
+    const { nome, pin, senha } = req.body
+    if (senha !== (process.env.ADMIN_SECRET || 'financas2024admin')) {
+      return res.status(403).json({ erro: 'Senha de configuração incorreta' })
+    }
+    if (!nome || !pin || !/^\d{4}$/.test(String(pin))) {
+      return res.status(400).json({ erro: 'Nome e PIN de 4 dígitos obrigatórios' })
+    }
+    const telefone = 'admin_' + nome.toLowerCase().replace(/\s+/g, '')
+    db.criarUsuario(nome, telefone, 0, String(pin), 1, 'super_admin')
+    res.json(db.obterUsuario(telefone))
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.get('/status', (req, res) => {
   const usuarios = db.listarUsuarios()
   res.json({ configurado: usuarios.length > 0, usuarios })
 })
 
-router.get('/usuarios', (req, res) => res.json(db.listarUsuarios()))
+router.get('/usuarios', (req, res) => {
+  const { familiaId } = req.query
+  res.json(db.listarUsuarios(familiaId ? parseInt(familiaId) : null))
+})
 
 router.post('/usuarios', (req, res) => {
   try {
-    const { nome, salario, telefone: tel, pin } = req.body
+    const { nome, salario, telefone: tel, pin, familiaId, role } = req.body
     if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
-    // usa celular fornecido ou gera identificador pelo nome
     const telefone = (tel && tel.trim()) ? tel.trim().replace(/\D/g, '') : nome.toLowerCase().replace(/\s+/g, '')
-    db.criarUsuario(nome, telefone, salario || 0, pin || '0000')
+    db.criarUsuario(nome, telefone, salario || 0, pin || '0000', familiaId ? parseInt(familiaId) : 1, role || 'membro')
     res.json(db.obterUsuario(telefone))
   } catch (e) {
     console.error('POST /usuarios erro:', e.message)
     res.status(500).json({ erro: e.message })
   }
+})
+
+// ===== FAMÍLIAS =====
+router.get('/familias', (req, res) => {
+  res.json(db.listarFamilias())
+})
+
+router.post('/familias', (req, res) => {
+  try {
+    const { nome } = req.body
+    if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
+    const result = db.criarFamilia(nome)
+    res.json({ id: Number(result.lastInsertRowid), nome })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.put('/familias/:id', (req, res) => {
+  const { nome } = req.body
+  db.editarFamilia(req.params.id, nome)
+  res.json({ ok: true })
 })
 
 router.post('/login', (req, res) => {
@@ -108,7 +150,8 @@ router.put('/usuarios/:id', (req, res) => {
 })
 
 router.get('/alertas', (req, res) => {
-  res.json(db.alertasVencimento())
+  const { familiaId } = req.query
+  res.json(db.alertasVencimento(familiaId ? parseInt(familiaId) : null))
 })
 
 router.post('/chat', async (req, res) => {
@@ -120,7 +163,8 @@ router.post('/chat', async (req, res) => {
 
 router.get('/resumo', (req, res) => {
   try {
-    res.json(db.resumoFinanceiro())
+    const { familiaId } = req.query
+    res.json(db.resumoFinanceiro(familiaId ? parseInt(familiaId) : null))
   } catch (e) {
     console.error('GET /resumo erro:', e.message)
     res.status(500).json({ erro: e.message })
@@ -148,8 +192,8 @@ router.post('/gastos', (req, res) => {
 
 router.get('/gastos', (req, res) => {
   try {
-    const { mes, ano } = req.query
-    res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null))
+    const { mes, ano, familiaId } = req.query
+    res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
@@ -157,22 +201,26 @@ router.get('/gastos', (req, res) => {
 
 router.get('/gastos/recentes', (req, res) => {
   try {
-    res.json(db.ultimosGastos(30))
+    const { familiaId } = req.query
+    res.json(db.ultimosGastos(30, familiaId ? parseInt(familiaId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
 })
 
 router.get('/gastos/categorias', (req, res) => {
-  const { mes, ano } = req.query
-  res.json(db.gastosPorCategoria(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null))
+  const { mes, ano, familiaId } = req.query
+  res.json(db.gastosPorCategoria(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null))
 })
 
-router.get('/gastos/evolucao', (req, res) => res.json(db.gastosPorMes(6)))
+router.get('/gastos/evolucao', (req, res) => {
+  const { familiaId } = req.query
+  res.json(db.gastosPorMes(6, familiaId ? parseInt(familiaId) : null))
+})
 
 router.get('/cartoes', (req, res) => {
-  const { usuarioId } = req.query
-  res.json(db.listarCartoes(usuarioId ? parseInt(usuarioId) : null))
+  const { familiaId } = req.query
+  res.json(db.listarCartoes(familiaId ? parseInt(familiaId) : null))
 })
 
 router.post('/cartoes', (req, res) => {
@@ -199,8 +247,8 @@ router.delete('/cartoes/:id', (req, res) => {
 })
 
 router.get('/contas', (req, res) => {
-  const { usuarioId } = req.query
-  res.json(db.listarContas(usuarioId ? parseInt(usuarioId) : null))
+  const { familiaId } = req.query
+  res.json(db.listarContas(familiaId ? parseInt(familiaId) : null))
 })
 
 router.post('/contas', (req, res) => {
@@ -227,7 +275,10 @@ router.delete('/contas/:id', (req, res) => {
   res.json({ ok: true })
 })
 
-router.get('/metas', (req, res) => res.json(db.listarMetas()))
+router.get('/metas', (req, res) => {
+  const { familiaId } = req.query
+  res.json(db.listarMetas(familiaId ? parseInt(familiaId) : null))
+})
 
 router.post('/metas', (req, res) => {
   try {
@@ -248,8 +299,8 @@ router.put('/metas/:id', (req, res) => {
 
 // Empréstimos
 router.get('/emprestimos', (req, res) => {
-  const { usuarioId } = req.query
-  res.json(db.listarEmprestimos(usuarioId ? parseInt(usuarioId) : null))
+  const { familiaId } = req.query
+  res.json(db.listarEmprestimos(familiaId ? parseInt(familiaId) : null))
 })
 
 router.post('/emprestimos', (req, res) => {
@@ -283,8 +334,8 @@ router.delete('/emprestimos/:id', (req, res) => {
 
 // Receitas
 router.get('/receitas', (req, res) => {
-  const { usuarioId } = req.query
-  res.json(db.listarReceitas(usuarioId ? parseInt(usuarioId) : null))
+  const { familiaId } = req.query
+  res.json(db.listarReceitas(familiaId ? parseInt(familiaId) : null))
 })
 
 router.post('/receitas', (req, res) => {
@@ -305,12 +356,14 @@ router.delete('/receitas/:id', (req, res) => {
 })
 
 router.get('/receitas/evolucao', (req, res) => {
-  res.json(db.receitasPorMes(6))
+  const { familiaId } = req.query
+  res.json(db.receitasPorMes(6, familiaId ? parseInt(familiaId) : null))
 })
 
 router.get('/projecao', (req, res) => {
   try {
-    res.json(db.projecaoGastosMeses(4))
+    const { familiaId } = req.query
+    res.json(db.projecaoGastosMeses(4, familiaId ? parseInt(familiaId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
@@ -471,16 +524,16 @@ function mapearCategoriaCSV(cat) {
 
 // Histórico de importações
 router.get('/importacoes', (req, res) => {
-  const { usuarioId } = req.query
-  res.json(db.listarImportacoes(usuarioId ? parseInt(usuarioId) : null))
+  const { familiaId } = req.query
+  res.json(db.listarImportacoes(familiaId ? parseInt(familiaId) : null))
 })
 
 // Exportar CSV do mês
 router.get('/exportar/csv', (req, res) => {
   try {
-    const { mes, ano } = req.query
-    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
-    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
+    const { mes, ano, familiaId } = req.query
+    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null)
+    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null)
 
     const linhas = ['Data;Descrição;Categoria;Valor;Tipo;Pessoa;Cartão;Forma Pagamento']
     for (const r of receitas) {
@@ -504,10 +557,11 @@ router.get('/exportar/csv', (req, res) => {
 // Dados para relatório HTML (exportação visual)
 router.get('/exportar/dados', (req, res) => {
   try {
-    const { mes, ano } = req.query
-    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
-    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null)
-    const resumo = db.resumoFinanceiro()
+    const { mes, ano, familiaId } = req.query
+    const fid = familiaId ? parseInt(familiaId) : null
+    const gastos = db.listarGastosExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, fid)
+    const receitas = db.listarReceitasExport(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, fid)
+    const resumo = db.resumoFinanceiro(fid)
     res.json({ gastos, receitas, resumo })
   } catch (e) {
     res.status(500).json({ erro: e.message })
@@ -515,7 +569,8 @@ router.get('/exportar/dados', (req, res) => {
 })
 
 router.get('/plano', async (req, res) => {
-  const resumo = db.resumoFinanceiro()
+  const { familiaId } = req.query
+  const resumo = db.resumoFinanceiro(familiaId ? parseInt(familiaId) : null)
   const plano = await gerarPlanoEconomia(resumo)
   res.json({ plano })
 })

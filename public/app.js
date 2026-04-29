@@ -5,6 +5,15 @@ let usuario = null
 let graficoInstance = null
 let metaEmojiSel = '🎯'
 let receitaTipoSel = 'Freelance'
+let adminVisualizandoFamiliaId = null  // quando super_admin está vendo uma família
+
+// Retorna o familiaId ativo: da família que o admin está visualizando, ou do próprio usuário
+function famId() {
+  if (adminVisualizandoFamiliaId) return adminVisualizandoFamiliaId
+  return usuario?.familia_id || null
+}
+function famQ() { const f = famId(); return f ? '?familiaId=' + f : '' }
+function famQAnd() { const f = famId(); return f ? '&familiaId=' + f : '' }
 
 const AVATARES = ['👨','👩','🧑','👦','👧','👤']
 const SAUDACOES = () => {
@@ -195,7 +204,12 @@ async function verificarPin() {
     fecharModal('modal-pin')
     usuario = { ...res, id: Number(res.id) }
     localStorage.setItem('fin_usuario', JSON.stringify(usuario))
-    mostrarApp()
+    if (usuario.role === 'super_admin') {
+      show('app')
+      mostrarPainelAdmin()
+    } else {
+      mostrarApp()
+    }
   } catch(e) {
     pinAtual = ''
     atualizarPinDots()
@@ -257,6 +271,10 @@ async function salvarPerfil() {
 // ── APP ──
 async function mostrarApp() {
   show('app')
+  document.getElementById('painel-admin').style.display = 'none'
+  document.getElementById('app-main').style.display = ''
+  document.getElementById('app-nav').style.display = ''
+  document.getElementById('admin-voltar-banner').style.display = adminVisualizandoFamiliaId ? 'flex' : 'none'
   const usuarios = await api('/usuarios')
   const idx = usuarios.findIndex(u => u.id === usuario.id)
   document.getElementById('h-avatar').textContent = AVATARES[idx] || '👤'
@@ -270,7 +288,7 @@ async function mostrarApp() {
 // ── INÍCIO ──
 async function carregarInicio() {
   try {
-    const [resumo, gastos] = await Promise.all([api('/resumo'), api('/gastos/recentes')])
+    const [resumo, gastos] = await Promise.all([api('/resumo' + famQ()), api('/gastos/recentes' + famQ())])
 
     // Balance
     const rendaTotal = resumo.rendaTotal || resumo.salarioTotal || 0
@@ -324,7 +342,7 @@ async function carregarInicio() {
 // ── ALERTAS ──
 async function verificarAlertas() {
   try {
-    const [alertas, projecao] = await Promise.all([api('/alertas'), api('/projecao')])
+    const [alertas, projecao] = await Promise.all([api('/alertas' + famQ()), api('/projecao' + famQ())])
     const banner = document.getElementById('alertas-banner')
 
     const temEmpAlerta = alertas && alertas.length > 0
@@ -430,7 +448,7 @@ async function abrirRelatorio() {
     '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
 
   const [gastosEv, receitasEv, cats] = await Promise.all([
-    api('/gastos/evolucao'), api('/receitas/evolucao'), api('/gastos/categorias')
+    api('/gastos/evolucao' + famQ()), api('/receitas/evolucao' + famQ()), api('/gastos/categorias' + famQ())
   ])
 
   const nomeMes = mesStr => {
@@ -654,7 +672,7 @@ function appendChat(el) {
 
 // ── METAS ──
 async function carregarMetas() {
-  const [metas, resumo] = await Promise.all([api('/metas'), api('/resumo')])
+  const [metas, resumo] = await Promise.all([api('/metas' + famQ()), api('/resumo' + famQ())])
 
   // Resumo financeiro do planejamento
   const economia = resumo.salarioTotal - resumo.gastosMes
@@ -716,7 +734,7 @@ async function carregarMetas() {
 
 // ── CARTÕES ──
 async function carregarCartoes() {
-  const [cartoes, cats] = await Promise.all([api('/cartoes'), api('/gastos/categorias')])
+  const [cartoes, cats] = await Promise.all([api('/cartoes' + famQ()), api('/gastos/categorias' + famQ())])
 
   const el = document.getElementById('cartoes-full')
   if (!cartoes.length) {
@@ -798,7 +816,7 @@ const CORES_CONTA = ['#2563eb','#16a34a','#7c3aed','#d97706','#0891b2','#db2777'
 
 async function carregarContas() {
   try {
-    const [contas, gastos] = await Promise.all([api('/contas'), api('/gastos/recentes')])
+    const [contas, gastos] = await Promise.all([api('/contas' + famQ()), api('/gastos/recentes' + famQ())])
 
     // — Saldo total —
     const total = contas.reduce((a, c) => a + Number(c.saldo), 0)
@@ -912,7 +930,7 @@ async function deletarContaAtual() {
     await api(`/contas/${contaEditandoId}`, { method: 'DELETE' })
     fecharModal('modal-editar-conta')
     toast('🗑️ Conta excluída')
-    const contas = await api('/contas')
+    const contas = await api('/contas' + famQ())
     renderContasRow(contas)
     carregarContas()
     carregarInicio()
@@ -1009,7 +1027,7 @@ async function salvarConta() {
     document.getElementById('ct-banco').value = ''
     document.getElementById('ct-saldo').value = ''
     toast(`✅ Conta "${nome}" adicionada!`)
-    const contas = await api('/contas')
+    const contas = await api('/contas' + famQ())
     renderContasRow(contas)
     carregarContas()
     carregarInicio()
@@ -1034,7 +1052,7 @@ async function abrirModalGasto() {
 
   // Carrega cartões do usuário
   try {
-    const cartoes = await api(`/cartoes?usuarioId=${usuario.id}`)
+    const cartoes = await api('/cartoes' + famQ())
     const sel = document.getElementById('g-cartao')
     sel.innerHTML = `<option value="">Sem cartão específico</option>` +
       cartoes.map(c => `<option value="${c.id}">${c.nome} (disp. ${fmt(c.limite - c.gasto_atual)})</option>`).join('')
@@ -1228,7 +1246,7 @@ async function mostrarResultadosAnalise(resultados) {
   titulo.textContent = `📊 ${resultados.length} arquivo${resultados.length > 1 ? 's' : ''} analisado${resultados.length > 1 ? 's' : ''}`
 
   // Carrega contas e cartões para os selects
-  const [contas, cartoes] = await Promise.all([api('/contas').catch(() => []), api('/cartoes').catch(() => [])])
+  const [contas, cartoes] = await Promise.all([api('/contas' + famQ()).catch(() => []), api('/cartoes' + famQ()).catch(() => [])])
 
   conteudo.innerHTML = resultados.map((data, idx) => renderCardResultado(data, idx, contas, cartoes)).join('')
 
@@ -1424,7 +1442,7 @@ async function carregarReceitasMes() {
   const el = document.getElementById('receitas-mes-lista')
   if (!el) return
   try {
-    const receitas = await api(`/receitas?usuarioId=${usuario.id}`)
+    const receitas = await api('/receitas' + famQ())
     const now = new Date()
     const mesStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`
     const doMes = receitas.filter(r => r.data_receita?.startsWith(mesStr))
@@ -1580,7 +1598,7 @@ async function deletarEmprestimoAtual() {
 }
 
 async function renderEmprestimos() {
-  const emprestimos = await api('/emprestimos')
+  const emprestimos = await api('/emprestimos' + famQ())
   const el = document.getElementById('inicio-emprestimos')
   if (!el) return
 
@@ -1638,7 +1656,7 @@ async function abrirPlano() {
     </div>
   `
   try {
-    const { plano } = await api('/plano')
+    const { plano } = await api('/plano' + famQ())
     document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">${plano}</div>`
   } catch {
     document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">❌ Erro ao gerar plano. Tente novamente.</div>`
@@ -1655,7 +1673,7 @@ function exportarCSV() {
   const now = new Date()
   const mes = now.getMonth() + 1
   const ano = now.getFullYear()
-  window.location.href = `/api/exportar/csv?mes=${mes}&ano=${ano}`
+  window.location.href = `/api/exportar/csv?mes=${mes}&ano=${ano}${famQAnd()}`
   toast('📥 Download do CSV iniciado!')
 }
 
@@ -1665,7 +1683,7 @@ async function abrirRelatorioHTML() {
   const ano = now.getFullYear()
   toast('⏳ Gerando relatório...')
   try {
-    const { gastos, receitas, resumo } = await api(`/exportar/dados?mes=${mes}&ano=${ano}`)
+    const { gastos, receitas, resumo } = await api(`/exportar/dados?mes=${mes}&ano=${ano}${famQAnd()}`)
     const nomeMes = now.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
     const totalReceitas = receitas.reduce((a, r) => a + r.valor, 0) + (resumo.salarioTotal || 0)
     const totalGastos = gastos.reduce((a, g) => a + g.valor, 0)
@@ -1741,7 +1759,7 @@ async function abrirHistoricoImportacoes() {
   modal.style.display = 'flex'
 
   try {
-    const lista = await api(`/importacoes?usuarioId=${usuario.id}`)
+    const lista = await api('/importacoes' + famQ())
     if (!lista.length) {
       conteudo.innerHTML = `<p class="res-desc" style="text-align:center;padding:24px">Nenhuma importação realizada ainda.</p>`
       return
@@ -1757,6 +1775,71 @@ async function abrirHistoricoImportacoes() {
     }).join('')
   } catch (e) {
     conteudo.innerHTML = `<p class="res-desc">Erro ao carregar: ${e.message}</p>`
+  }
+}
+
+// ── PAINEL SUPER ADMIN ──
+async function mostrarPainelAdmin() {
+  document.getElementById('app-main').style.display = 'none'
+  document.getElementById('app-nav').style.display = 'none'
+  document.getElementById('admin-voltar-banner').style.display = 'none'
+  const painel = document.getElementById('painel-admin')
+  painel.style.display = 'flex'
+
+  document.getElementById('h-saudacao').textContent = SAUDACOES() + ','
+  document.getElementById('h-nome').textContent = '🔐 Admin'
+  document.getElementById('h-avatar').textContent = '🛡️'
+
+  const lista = document.getElementById('admin-familias-lista')
+  lista.innerHTML = '<div class="plano-loading"><div class="spinner"></div><p>Carregando famílias...</p></div>'
+
+  try {
+    const familias = await api('/familias')
+    if (!familias.length) {
+      lista.innerHTML = '<div style="text-align:center;padding:32px;color:#94a3b8">Nenhuma família cadastrada ainda.</div>'
+      return
+    }
+    lista.innerHTML = familias.map(f => `
+      <div class="admin-fam-card">
+        <div class="admin-fam-info">
+          <div class="admin-fam-nome">🏠 ${f.nome}</div>
+          <div class="admin-fam-meta">${f.total_membros} membro${f.total_membros !== 1 ? 's' : ''}</div>
+        </div>
+        <button class="btn-visualizar" onclick="visualizarFamilia(${f.id}, '${f.nome.replace(/'/g, "\\'")}')">
+          👁️ Visualizar
+        </button>
+      </div>
+    `).join('')
+  } catch (e) {
+    lista.innerHTML = `<div style="color:#dc2626;padding:16px">Erro: ${e.message}</div>`
+  }
+}
+
+async function visualizarFamilia(familiaId, familiaNome) {
+  adminVisualizandoFamiliaId = familiaId
+  document.getElementById('admin-voltar-nome').textContent = familiaNome
+  await mostrarApp()
+  carregarInicio()
+}
+
+function voltarParaAdmin() {
+  adminVisualizandoFamiliaId = null
+  mostrarPainelAdmin()
+}
+
+async function criarNovaFamilia() {
+  const nome = prompt('Nome da nova família:')
+  if (!nome?.trim()) return
+  try {
+    await api('/familias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: nome.trim() })
+    })
+    toast(`✅ Família "${nome.trim()}" criada!`)
+    mostrarPainelAdmin()
+  } catch (e) {
+    toast('❌ Erro ao criar família: ' + e.message, 'erro')
   }
 }
 

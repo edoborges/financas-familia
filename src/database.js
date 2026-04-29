@@ -7,20 +7,31 @@ if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true })
 
 const db = new DatabaseSync(path.join(dataPath, 'financeiro.db'))
 db.exec('PRAGMA journal_mode = WAL')
-// Migrações
+
+// Migrações seguras
 try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
 try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
+try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS familias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
     telefone TEXT UNIQUE NOT NULL,
     salario REAL DEFAULT 0,
     pin TEXT DEFAULT '0000',
+    familia_id INTEGER DEFAULT 1,
+    role TEXT DEFAULT 'membro',
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -68,6 +79,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS metas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER DEFAULT 1,
     nome TEXT NOT NULL,
     categoria TEXT DEFAULT 'Outros',
     valor_alvo REAL NOT NULL,
@@ -118,6 +130,32 @@ db.exec(`
   );
 `)
 
+// Seed: garante que a família principal existe e usuários legados ficam nela
+const famCount = db.prepare('SELECT COUNT(*) as n FROM familias').get()
+if (famCount.n === 0) {
+  db.exec("INSERT INTO familias (id, nome) VALUES (1, 'Família Principal')")
+}
+db.exec("UPDATE usuarios SET familia_id = 1 WHERE familia_id IS NULL OR familia_id = 0")
+try { db.exec("ALTER TABLE metas ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
+
+// ===== FAMÍLIAS =====
+function criarFamilia(nome) {
+  return db.prepare('INSERT INTO familias (nome) VALUES (?)').run(nome)
+}
+function listarFamilias() {
+  return db.prepare(`
+    SELECT f.*, COUNT(u.id) as total_membros
+    FROM familias f LEFT JOIN usuarios u ON u.familia_id = f.id
+    GROUP BY f.id ORDER BY f.id
+  `).all()
+}
+function obterFamilia(id) {
+  return db.prepare('SELECT * FROM familias WHERE id = ?').get(id)
+}
+function editarFamilia(id, nome) {
+  return db.prepare('UPDATE familias SET nome = ? WHERE id = ?').run(nome, id)
+}
+
 // ===== USUÁRIOS =====
 function obterUsuario(telefone) {
   return db.prepare('SELECT * FROM usuarios WHERE telefone = ?').get(telefone)
@@ -125,8 +163,8 @@ function obterUsuario(telefone) {
 function obterUsuarioPorId(id) {
   return db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id)
 }
-function criarUsuario(nome, telefone, salario = 0, pin = '0000') {
-  return db.prepare('INSERT OR IGNORE INTO usuarios (nome, telefone, salario, pin) VALUES (?, ?, ?, ?)').run(nome, telefone, salario, pin)
+function criarUsuario(nome, telefone, salario = 0, pin = '0000', familiaId = 1, role = 'membro') {
+  return db.prepare('INSERT OR IGNORE INTO usuarios (nome, telefone, salario, pin, familia_id, role) VALUES (?, ?, ?, ?, ?, ?)').run(nome, telefone, salario, pin, familiaId, role)
 }
 function autenticarUsuario(usuarioId, pin) {
   return db.prepare('SELECT * FROM usuarios WHERE id = ? AND pin = ?').get(usuarioId, pin)
@@ -137,7 +175,8 @@ function atualizarSalario(telefone, salario) {
 function editarUsuario(id, nome, salario, telefone, pin) {
   return db.prepare('UPDATE usuarios SET nome=?, salario=?, telefone=?, pin=? WHERE id=?').run(nome, salario, telefone, pin, id)
 }
-function listarUsuarios() {
+function listarUsuarios(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT * FROM usuarios WHERE familia_id = ?').all(familiaId)
   return db.prepare('SELECT * FROM usuarios').all()
 }
 
@@ -145,8 +184,8 @@ function listarUsuarios() {
 function criarConta(usuarioId, nome, banco, tipo, saldo, cor) {
   return db.prepare('INSERT INTO contas (usuario_id, nome, banco, tipo, saldo, cor) VALUES (?, ?, ?, ?, ?, ?)').run(usuarioId, nome, banco || '', tipo || 'corrente', saldo || 0, cor || '#2980b9')
 }
-function listarContas(usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id WHERE c.usuario_id = ?').all(usuarioId)
+function listarContas(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id WHERE u.familia_id = ?').all(familiaId)
   return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id').all()
 }
 function atualizarSaldoConta(id, saldo) {
@@ -172,8 +211,8 @@ function gerarCoresCartao(nome) {
   const idx = nome.charCodeAt(0) % paletas.length
   return paletas[idx]
 }
-function listarCartoes(usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id WHERE c.usuario_id = ?').all(usuarioId)
+function listarCartoes(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id WHERE u.familia_id = ?').all(familiaId)
   return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id').all()
 }
 function obterCartaoPorNome(nome, usuarioId) {
@@ -211,30 +250,48 @@ function registrarCompraParcelada(usuarioId, descricao, valor, categoria, formaP
       db.prepare('UPDATE gastos SET grupo_parcela = ? WHERE id = ?').run(grupoId, grupoId)
     }
   }
-  // Só a parcela do mês atual conta na fatura do cartão
   if (cartaoId) atualizarGastoCartao(cartaoId, valorParcela)
   return grupoId
 }
-function listarGastosMes(mes = null, ano = null) {
+
+function listarGastosMes(mes = null, ano = null, familiaId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  if (familiaId) {
+    return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ? ORDER BY g.criado_em DESC`).all(mesStr, familiaId)
+  }
   return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? ORDER BY g.criado_em DESC`).all(mesStr)
 }
-function totalGastosMes(usuarioId = null) {
+
+function totalGastosMes(familiaId = null) {
   const now = new Date()
   const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  if (usuarioId) return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE usuario_id = ? AND strftime('%Y-%m', data_gasto) = ?`).get(usuarioId, mesStr)
+  if (familiaId) {
+    return db.prepare(`SELECT COALESCE(SUM(g.valor), 0) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`).get(familiaId, mesStr)
+  }
   return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
 }
-function gastosPorCategoria(mes = null, ano = null) {
+
+function gastosPorCategoria(mes = null, ano = null, familiaId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  if (familiaId) {
+    return db.prepare(`SELECT g.categoria, SUM(g.valor) as total, COUNT(*) as quantidade FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ? GROUP BY g.categoria ORDER BY total DESC`).all(mesStr, familiaId)
+  }
   return db.prepare(`SELECT categoria, SUM(valor) as total, COUNT(*) as quantidade FROM gastos WHERE strftime('%Y-%m', data_gasto) = ? GROUP BY categoria ORDER BY total DESC`).all(mesStr)
 }
-function ultimosGastos(limite = 10) {
+
+function ultimosGastos(limite = 10, familiaId = null) {
+  if (familiaId) {
+    return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE u.familia_id = ? ORDER BY g.criado_em DESC LIMIT ?`).all(familiaId, limite)
+  }
   return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id ORDER BY g.criado_em DESC LIMIT ?`).all(limite)
 }
-function gastosPorMes(meses = 6) {
+
+function gastosPorMes(meses = 6, familiaId = null) {
+  if (familiaId) {
+    return db.prepare(`SELECT strftime('%Y-%m', g.data_gasto) as mes, SUM(g.valor) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(familiaId, meses)
+  }
   return db.prepare(`SELECT strftime('%Y-%m', data_gasto) as mes, SUM(valor) as total FROM gastos GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
 }
 
@@ -243,41 +300,52 @@ function registrarReceita(usuarioId, valor, descricao = 'Salário', dataReceita 
   const data = dataReceita || new Date().toISOString().split('T')[0]
   return db.prepare('INSERT INTO receitas (usuario_id, valor, descricao, data_receita) VALUES (?, ?, ?, ?)').run(usuarioId, valor, descricao, data)
 }
-function listarReceitas(usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE r.usuario_id = ? ORDER BY r.data_receita DESC').all(usuarioId)
+function listarReceitas(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? ORDER BY r.data_receita DESC').all(familiaId)
   return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id ORDER BY r.data_receita DESC').all()
 }
-function totalReceitasMes(usuarioId = null) {
+function totalReceitasMes(familiaId = null) {
   const now = new Date()
   const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  if (usuarioId) return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM receitas WHERE usuario_id = ? AND strftime('%Y-%m', data_receita) = ?`).get(usuarioId, mesStr)
+  if (familiaId) {
+    return db.prepare(`SELECT COALESCE(SUM(r.valor), 0) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_receita) = ?`).get(familiaId, mesStr)
+  }
   return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM receitas WHERE strftime('%Y-%m', data_receita) = ?`).get(mesStr)
 }
 function deletarReceita(id) {
   return db.prepare('DELETE FROM receitas WHERE id = ?').run(id)
 }
-function receitasPorMes(meses = 6) {
+function receitasPorMes(meses = 6, familiaId = null) {
+  if (familiaId) {
+    return db.prepare(`SELECT strftime('%Y-%m', r.data_receita) as mes, SUM(r.valor) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(familiaId, meses)
+  }
   return db.prepare(`SELECT strftime('%Y-%m', data_receita) as mes, SUM(valor) as total FROM receitas GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
 }
 
 // ===== PROJEÇÃO =====
-function projecaoGastosMeses(meses = 4) {
+function projecaoGastosMeses(meses = 4, familiaId = null) {
   const now = new Date()
   const results = []
   for (let i = 1; i <= meses; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
     const mesStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const row = db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
+    let row
+    if (familiaId) {
+      row = db.prepare(`SELECT COALESCE(SUM(g.valor), 0) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ?`).get(mesStr, familiaId)
+    } else {
+      row = db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
+    }
     results.push({ mes: mesStr, total: Number(row.total) })
   }
   return results
 }
 
 // ===== METAS =====
-function criarMeta(nome, valorAlvo, prazo = null, descricao = null, categoria = 'Outros', emoji = '🎯') {
-  return db.prepare('INSERT INTO metas (nome, valor_alvo, prazo, descricao, categoria, emoji) VALUES (?, ?, ?, ?, ?, ?)').run(nome, valorAlvo, prazo, descricao, categoria, emoji)
+function criarMeta(nome, valorAlvo, prazo = null, descricao = null, categoria = 'Outros', emoji = '🎯', familiaId = 1) {
+  return db.prepare('INSERT INTO metas (nome, valor_alvo, prazo, descricao, categoria, emoji, familia_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(nome, valorAlvo, prazo, descricao, categoria, emoji, familiaId)
 }
-function listarMetas() {
+function listarMetas(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT * FROM metas WHERE familia_id = ? ORDER BY criado_em DESC').all(familiaId)
   return db.prepare('SELECT * FROM metas ORDER BY criado_em DESC').all()
 }
 function atualizarMeta(id, valorAtual) {
@@ -289,8 +357,8 @@ function criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcela
   return db.prepare(`INSERT INTO emprestimos (usuario_id, tipo, descricao, credor, valor_total, parcela_mensal, total_parcelas, taxa_juros, data_vencimento)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal || 0, totalParcelas || 1, taxaJuros || 0, dataVencimento || null)
 }
-function listarEmprestimos(usuarioId = null) {
-  if (usuarioId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.usuario_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(usuarioId)
+function listarEmprestimos(familiaId = null) {
+  if (familiaId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(familiaId)
   return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = 'ativo' ORDER BY e.criado_em DESC").all()
 }
 function atualizarEmprestimo(id, valorPago, parcelasPagas) {
@@ -309,36 +377,40 @@ function editarEmprestimo(id, tipo, descricao, credor, valorTotal, parcelaMensal
 function deletarEmprestimo(id) {
   return db.prepare('DELETE FROM emprestimos WHERE id = ?').run(id)
 }
-function totalDividas() {
+function totalDividas(familiaId = null) {
+  if (familiaId) {
+    const result = db.prepare("SELECT COALESCE(SUM(e.valor_total - e.valor_pago), 0) as total FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo'").get(familiaId)
+    return Number(result.total)
+  }
   const result = db.prepare("SELECT COALESCE(SUM(valor_total - valor_pago), 0) as total FROM emprestimos WHERE status = 'ativo'").get()
   return Number(result.total)
 }
 
-// ===== RESUMO =====
-function resumoFinanceiro() {
-  const usuarios = listarUsuarios()
+// ===== RESUMO POR FAMÍLIA =====
+function resumoFinanceiro(familiaId = null) {
+  const usuarios = listarUsuarios(familiaId)
   const salarioTotal = usuarios.reduce((acc, u) => acc + u.salario, 0)
-  const { total: gastosMes } = totalGastosMes()
-  const { total: receitasExtras } = totalReceitasMes()
+  const { total: gastosMes } = totalGastosMes(familiaId)
+  const { total: receitasExtras } = totalReceitasMes(familiaId)
   const rendaTotal = salarioTotal + Number(receitasExtras || 0)
-  const cartoes = listarCartoes()
-  const contas = listarContas()
-  const metas = listarMetas()
-  const categorias = gastosPorCategoria()
-  const evolucao = gastosPorMes(6)
+  const cartoes = listarCartoes(familiaId)
+  const contas = listarContas(familiaId)
+  const metas = listarMetas(familiaId)
+  const categorias = gastosPorCategoria(null, null, familiaId)
+  const evolucao = gastosPorMes(6, familiaId)
   const saldoContas = contas.reduce((a, c) => a + c.saldo, 0)
-  const emprestimos = listarEmprestimos()
-  const totalEmDividas = totalDividas()
-  const projecao = projecaoGastosMeses(4)
+  const emprestimos = listarEmprestimos(familiaId)
+  const totalEmDividas = totalDividas(familiaId)
+  const projecao = projecaoGastosMeses(4, familiaId)
   return { salarioTotal, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao }
 }
 
-// ===== IMPORTAÇÕES & HISTÓRICO =====
+// ===== IMPORTAÇÕES =====
 function registrarImportacao(usuarioId, tipo, descricao, qtd, duplicatas = 0) {
   return db.prepare('INSERT INTO importacoes (usuario_id, tipo, descricao, qtd_registros, duplicatas_ignoradas) VALUES (?, ?, ?, ?, ?)').run(usuarioId, tipo, descricao, qtd, duplicatas)
 }
-function listarImportacoes(usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT * FROM importacoes WHERE usuario_id = ? ORDER BY criado_em DESC LIMIT 30').all(usuarioId)
+function listarImportacoes(familiaId = null) {
+  if (familiaId) return db.prepare('SELECT i.* FROM importacoes i JOIN usuarios u ON i.usuario_id = u.id WHERE u.familia_id = ? ORDER BY i.criado_em DESC LIMIT 30').all(familiaId)
   return db.prepare('SELECT * FROM importacoes ORDER BY criado_em DESC LIMIT 30').all()
 }
 
@@ -355,41 +427,37 @@ function verificarDuplicataGasto(usuarioId, descricao, valor, data) {
 }
 
 // ===== EXPORTAÇÃO =====
-function listarGastosExport(mes = null, ano = null) {
+function listarGastosExport(mes = null, ano = null, familiaId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
-  return db.prepare(`
-    SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome
-    FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id
-    WHERE strftime('%Y-%m', g.data_gasto) = ? ORDER BY g.data_gasto DESC, g.criado_em DESC
-  `).all(mesStr)
+  if (familiaId) {
+    return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ? ORDER BY g.data_gasto DESC, g.criado_em DESC`).all(mesStr, familiaId)
+  }
+  return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? ORDER BY g.data_gasto DESC, g.criado_em DESC`).all(mesStr)
 }
-function listarReceitasExport(mes = null, ano = null) {
+function listarReceitasExport(mes = null, ano = null, familiaId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
-  return db.prepare(`
-    SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id
-    WHERE strftime('%Y-%m', r.data_receita) = ? ORDER BY r.data_receita DESC
-  `).all(mesStr)
+  if (familiaId) {
+    return db.prepare(`SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE strftime('%Y-%m', r.data_receita) = ? AND u.familia_id = ? ORDER BY r.data_receita DESC`).all(mesStr, familiaId)
+  }
+  return db.prepare(`SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE strftime('%Y-%m', r.data_receita) = ? ORDER BY r.data_receita DESC`).all(mesStr)
 }
 
 // ===== ALERTAS =====
-function alertasVencimento() {
+function alertasVencimento(familiaId = null) {
   const hoje = new Date()
   const em7dias = new Date(hoje)
   em7dias.setDate(hoje.getDate() + 7)
   const em7diasStr = em7dias.toISOString().split('T')[0]
-  return db.prepare(`
-    SELECT e.*, u.nome as usuario_nome
-    FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id
-    WHERE e.status = 'ativo'
-    AND e.data_vencimento IS NOT NULL
-    AND e.data_vencimento <= ?
-    ORDER BY e.data_vencimento ASC
-  `).all(em7diasStr)
+  if (familiaId) {
+    return db.prepare(`SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' AND e.data_vencimento IS NOT NULL AND e.data_vencimento <= ? ORDER BY e.data_vencimento ASC`).all(familiaId, em7diasStr)
+  }
+  return db.prepare(`SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = 'ativo' AND e.data_vencimento IS NOT NULL AND e.data_vencimento <= ? ORDER BY e.data_vencimento ASC`).all(em7diasStr)
 }
 
 module.exports = {
+  criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,
   criarConta, listarContas, atualizarSaldoConta, atualizarConta, deletarConta,
   criarCartao, listarCartoes, obterCartaoPorNome, atualizarGastoCartao, atualizarFaturaCartao, deletarCartao,

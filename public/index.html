@@ -108,8 +108,24 @@
     </div>
   </header>
 
+  <!-- BANNER ADMIN VISUALIZANDO FAMÍLIA -->
+  <div id="admin-voltar-banner" class="admin-voltar-banner" style="display:none">
+    <span>👁️ Visualizando: <strong id="admin-voltar-nome"></strong></span>
+    <button onclick="voltarParaAdmin()">← Voltar ao painel</button>
+  </div>
+
+  <!-- PAINEL SUPER ADMIN -->
+  <div id="painel-admin" style="display:none; flex:1; flex-direction:column; overflow-y:auto; padding:16px; gap:16px">
+    <div class="admin-header-bloco">
+      <div class="admin-titulo">🛡️ Painel Administrador</div>
+      <div class="admin-sub">Selecione uma família para visualizar os dados</div>
+    </div>
+    <div id="admin-familias-lista" class="admin-familias-lista"></div>
+    <button class="btn-nova-familia" onclick="criarNovaFamilia()">+ Nova família</button>
+  </div>
+
   <!-- CONTEÚDO -->
-  <main class="app-main" id="app-main">
+  <main class="app-main" id="app-main" style="display:block">
 
     <!-- ── ABA INÍCIO ── -->
     <section id="aba-inicio" class="aba">
@@ -295,7 +311,7 @@
   </main>
 
   <!-- NAV BOTTOM -->
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" id="app-nav">
     <button id="nav-inicio" class="nav-btn active" onclick="mostrarAba('inicio'); navBtn('nav-inicio')">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       <small>Início</small>
