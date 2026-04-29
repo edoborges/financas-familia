@@ -272,36 +272,37 @@ async function carregarInicio() {
     const [resumo, gastos] = await Promise.all([api('/resumo'), api('/gastos/recentes')])
 
     // Balance
-    const saldo = resumo.salarioTotal - resumo.gastosMes
-    const pct = resumo.salarioTotal > 0 ? ((resumo.gastosMes/resumo.salarioTotal)*100).toFixed(0) : 0
+    const saldo = (resumo.salarioTotal || 0) - (resumo.gastosMes || 0)
+    const pct = resumo.salarioTotal > 0 ? (((resumo.gastosMes||0)/(resumo.salarioTotal))*100).toFixed(0) : 0
     document.getElementById('b-saldo').textContent = fmt(saldo)
-    document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal)
-    document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes)
-    document.getElementById('b-contas').textContent = fmt(resumo.saldoContas)
+    document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal || 0)
+    document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
+    document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)
     document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
     const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
-    const dividas = resumo.totalEmDividas > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
+    const dividas = (resumo.totalEmDividas || 0) > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
     document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
 
     // Cartões
-    renderCartoesScroll(resumo.cartoes)
+    renderCartoesScroll(resumo.cartoes || [])
 
     // Contas
-    renderContasRow(resumo.contas)
+    renderContasRow(resumo.contas || [])
 
     // Empréstimos
     renderEmprestimos()
 
     // Evolução mini
-    renderEvolucaoMini(resumo.evolucao)
+    renderEvolucaoMini(resumo.evolucao || [])
 
     // Transações
-    renderTransacoes(gastos.slice(0,8))
+    renderTransacoes((gastos || []).slice(0,8))
 
     // Alertas de vencimento
     verificarAlertas()
   } catch (e) {
     console.error('carregarInicio erro:', e)
+    toast('⚠️ Erro ao atualizar: ' + e.message, 'erro')
   }
 }
 
@@ -726,6 +727,8 @@ async function salvarEdicaoConta() {
     })
     fecharModal('modal-editar-conta')
     toast(`✅ Conta "${nome}" atualizada!`)
+    const contas = await api('/contas')
+    renderContasRow(contas)
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao atualizar conta: ' + e.message, 'erro')
@@ -737,6 +740,8 @@ async function deletarContaAtual() {
     await api(`/contas/${contaEditandoId}`, { method: 'DELETE' })
     fecharModal('modal-editar-conta')
     toast('🗑️ Conta excluída')
+    const contas = await api('/contas')
+    renderContasRow(contas)
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao excluir: ' + e.message, 'erro')
@@ -830,7 +835,11 @@ async function salvarConta() {
     document.getElementById('ct-nome').value = ''
     document.getElementById('ct-banco').value = ''
     document.getElementById('ct-saldo').value = ''
-    toast(`✅ Conta "${nome}" adicionada com sucesso!`)
+    toast(`✅ Conta "${nome}" adicionada!`)
+    // Atualiza a seção de contas diretamente (não depende do /resumo)
+    const contas = await api('/contas')
+    renderContasRow(contas)
+    // Atualiza o resto da página em segundo plano
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao salvar conta: ' + e.message, 'erro')

@@ -64,14 +64,31 @@ router.post('/chat', async (req, res) => {
   res.json(resultado)
 })
 
-router.get('/resumo', (req, res) => res.json(db.resumoFinanceiro()))
-
-router.get('/gastos', (req, res) => {
-  const { mes, ano } = req.query
-  res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null))
+router.get('/resumo', (req, res) => {
+  try {
+    res.json(db.resumoFinanceiro())
+  } catch (e) {
+    console.error('GET /resumo erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
-router.get('/gastos/recentes', (req, res) => res.json(db.ultimosGastos(30)))
+router.get('/gastos', (req, res) => {
+  try {
+    const { mes, ano } = req.query
+    res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null))
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.get('/gastos/recentes', (req, res) => {
+  try {
+    res.json(db.ultimosGastos(30))
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
 
 router.get('/gastos/categorias', (req, res) => {
   const { mes, ano } = req.query
