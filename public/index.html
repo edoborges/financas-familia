@@ -145,13 +145,13 @@
           <span class="acao-icon">➕</span>
           <span>Lançar</span>
         </button>
+        <button class="acao-btn" onclick="abrirModalReceita()">
+          <span class="acao-icon">💰</span>
+          <span>Entrada</span>
+        </button>
         <button class="acao-btn" onclick="mostrarAba('contas'); navBtn('nav-contas')">
           <span class="acao-icon">🏦</span>
           <span>Contas</span>
-        </button>
-        <button class="acao-btn" onclick="mostrarAba('metas'); navBtn('nav-metas')">
-          <span class="acao-icon">🎯</span>
-          <span>Meta</span>
         </button>
         <button class="acao-btn" onclick="abrirRelatorio()">
           <span class="acao-icon">📊</span>
@@ -188,6 +188,12 @@
         <button class="ver-tudo" onclick="abrirRelatorio()">Ver relatório</button>
       </div>
       <div id="evolucao-mini" class="evolucao-mini"></div>
+
+      <!-- Projeção de parcelas futuras -->
+      <div class="section-title-row">
+        <span>📅 Projeção de Parcelas</span>
+      </div>
+      <div id="projecao-parcelas" class="projecao-row"></div>
 
       <!-- Últimas transações -->
       <div class="section-title-row">
@@ -491,6 +497,29 @@
     <h3>📊 Relatório Mensal</h3>
     <div id="relatorio-conteudo" class="relatorio-conteudo">
       <div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL RECEITA ══ -->
+<div id="modal-receita" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-receita')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>💰 Registrar Receita</h3>
+    <p class="modal-desc">Registro de entradas além do salário fixo: freelas, aluguéis, bônus etc.</p>
+    <div class="receita-tipos">
+      <button class="rtipo-btn sel" onclick="selReceitaTipo(this,'Freelance')">💻 Freela</button>
+      <button class="rtipo-btn" onclick="selReceitaTipo(this,'Aluguel')">🏠 Aluguel</button>
+      <button class="rtipo-btn" onclick="selReceitaTipo(this,'Bônus')">🎁 Bônus</button>
+      <button class="rtipo-btn" onclick="selReceitaTipo(this,'Outros')">📦 Outros</button>
+    </div>
+    <input id="r-descricao" type="text" placeholder="Descrição (ex: Projeto web cliente X)" />
+    <div class="input-prefix"><span>R$</span><input id="r-valor" type="text" inputmode="decimal" placeholder="Ex: 800,00" /></div>
+    <label class="input-label">Data do recebimento</label>
+    <input id="r-data" type="date" />
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-receita')">Cancelar</button>
+      <button class="btn-confirm btn-verde" onclick="salvarReceita()">💰 Registrar</button>
     </div>
   </div>
 </div>

@@ -28,6 +28,23 @@ async function processarMensagem(usuarioId, mensagem) {
     return { resposta: `📈 *Plano de Economia*\n\n${plano}`, tipo: 'plano' }
   }
 
+  // Detectar receita/entrada manual (ex: "Recebi R$500 de freela", "Entrada R$200 aluguel")
+  const receitaMatch = msgLower.match(/(?:recebi|entrada|renda|freela|salário|salario|bônus|bonus|extra|recebimento|depositaram|caiu na conta)\s+(?:de\s+)?r?\$?\s*([\d.,]+)/i)
+    || msgLower.match(/r?\$?\s*([\d.,]+)\s+(?:de\s+)?(?:receita|entrada|renda|freela|bônus|bonus|extra)/i)
+  if (receitaMatch) {
+    const valorStr = receitaMatch[1].replace(/\./g, '').replace(',', '.')
+    const valor = parseFloat(valorStr)
+    if (valor > 0) {
+      const descricao = mensagem.length < 80 ? mensagem : 'Receita extra'
+      db.registrarReceita(usuario.id, valor, descricao)
+      return {
+        resposta: `💰 Receita de R$${valor.toFixed(2)} registrada!\n\n✅ ${descricao}`,
+        tipo: 'receita',
+        valor
+      }
+    }
+  }
+
   const cartoes = db.listarCartoes(usuario.id)
   const { total: gastosMes } = db.totalGastosMes(usuario.id)
 
@@ -80,6 +97,16 @@ async function executarAcao(resultado, usuario) {
         valor: resultado.valor,
         categoria: resultado.categoria
       }
+    }
+
+    case 'receita': {
+      const valor = resultado.valor || 0
+      const descricao = resultado.descricao || 'Receita extra'
+      if (valor > 0) {
+        db.registrarReceita(usuario.id, valor, descricao)
+        return { resposta: `💰 Receita de R$${valor.toFixed(2)} registrada!\n✅ ${descricao}`, tipo: 'receita' }
+      }
+      return { resposta: resultado.resposta || 'Receita não identificada.', tipo: 'info' }
     }
 
     case 'consulta': {
@@ -200,6 +227,11 @@ function formatarAjuda() {
 • "Gasolina 80 débito"
 • "Farmácia R$45 Nubank"
 • "Academia R$99 crédito 3x"
+
+💰 Registrar receita:
+• "Recebi R$500 de freela"
+• "Entrada R$200 aluguel"
+• "Bônus R$1000"
 
 📊 Consultas:
 • "saldo" — resumo do mês

@@ -208,6 +208,37 @@ router.delete('/emprestimos/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Receitas
+router.get('/receitas', (req, res) => {
+  const { usuarioId } = req.query
+  res.json(db.listarReceitas(usuarioId ? parseInt(usuarioId) : null))
+})
+
+router.post('/receitas', (req, res) => {
+  try {
+    const { usuarioId, valor, descricao, dataReceita } = req.body
+    if (!usuarioId || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.registrarReceita(usuarioId, valor, descricao || 'Receita', dataReceita || null)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    console.error('POST /receitas erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.delete('/receitas/:id', (req, res) => {
+  db.deletarReceita(req.params.id)
+  res.json({ ok: true })
+})
+
+router.get('/projecao', (req, res) => {
+  try {
+    res.json(db.projecaoGastosMeses(4))
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.get('/plano', async (req, res) => {
   const resumo = db.resumoFinanceiro()
   const plano = await gerarPlanoEconomia(resumo)

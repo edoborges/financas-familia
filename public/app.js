@@ -4,6 +4,7 @@
 let usuario = null
 let graficoInstance = null
 let metaEmojiSel = '🎯'
+let receitaTipoSel = 'Freelance'
 
 const AVATARES = ['👨','👩','🧑','👦','👧','👤']
 const SAUDACOES = () => {
@@ -272,10 +273,11 @@ async function carregarInicio() {
     const [resumo, gastos] = await Promise.all([api('/resumo'), api('/gastos/recentes')])
 
     // Balance
-    const saldo = (resumo.salarioTotal || 0) - (resumo.gastosMes || 0)
-    const pct = resumo.salarioTotal > 0 ? (((resumo.gastosMes||0)/(resumo.salarioTotal))*100).toFixed(0) : 0
+    const rendaTotal = resumo.rendaTotal || resumo.salarioTotal || 0
+    const saldo = rendaTotal - (resumo.gastosMes || 0)
+    const pct = rendaTotal > 0 ? (((resumo.gastosMes||0)/rendaTotal)*100).toFixed(0) : 0
     document.getElementById('b-saldo').textContent = fmt(saldo)
-    document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal || 0)
+    document.getElementById('b-renda').textContent = fmt(rendaTotal)
     document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
     document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)
     document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
@@ -294,6 +296,9 @@ async function carregarInicio() {
 
     // Evolução mini
     renderEvolucaoMini(resumo.evolucao || [])
+
+    // Projeção de parcelas
+    renderProjecao(resumo.projecao || [])
 
     // Transações
     renderTransacoes((gastos || []).slice(0,8))
@@ -353,6 +358,32 @@ function renderEvolucaoMini(evolucao) {
       }).join('')}
     </div>
   `
+}
+
+// ── PROJEÇÃO DE PARCELAS ──
+function renderProjecao(projecao) {
+  const el = document.getElementById('projecao-parcelas')
+  if (!el) return
+
+  // Filtra só meses com parcelas futuras
+  const comGasto = (projecao || []).filter(p => p.total > 0)
+  if (!comGasto.length) {
+    el.innerHTML = `<div class="proj-vazio">✅ Sem parcelas futuras em aberto</div>`
+    return
+  }
+
+  const nomeMes = mesStr => {
+    const [, n] = mesStr.split('-')
+    return ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][parseInt(n)-1]
+  }
+
+  el.innerHTML = comGasto.map(p => `
+    <div class="proj-card">
+      <div class="proj-mes">${nomeMes(p.mes)}</div>
+      <div class="proj-valor">${fmt(p.total)}</div>
+      <div class="proj-label">em parcelas</div>
+    </div>
+  `).join('')
 }
 
 // ── RELATÓRIO COMPLETO ──
@@ -522,7 +553,7 @@ async function enviarMsg() {
     })
     loading.remove()
     addMsgBot(res.resposta || '❌ Sem resposta.')
-    if (res.tipo === 'gasto') carregarInicio()
+    if (res.tipo === 'gasto' || res.tipo === 'receita') carregarInicio()
   } catch {
     loading.remove()
     addMsgBot('❌ Erro de conexão. Tente novamente.')
@@ -917,6 +948,48 @@ async function salvarConta() {
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao salvar conta: ' + e.message, 'erro')
+  }
+}
+
+// ── RECEITAS ──
+function abrirModalReceita() {
+  // Preenche data de hoje por padrão
+  const hoje = new Date().toISOString().split('T')[0]
+  document.getElementById('r-data').value = hoje
+  document.getElementById('r-descricao').value = ''
+  document.getElementById('r-valor').value = ''
+  // Reseta seleção de tipo
+  document.querySelectorAll('.rtipo-btn').forEach(b => b.classList.remove('sel'))
+  document.querySelector('.rtipo-btn')?.classList.add('sel')
+  receitaTipoSel = 'Freelance'
+  document.getElementById('modal-receita').style.display = 'flex'
+}
+
+function selReceitaTipo(btn, tipo) {
+  document.querySelectorAll('.rtipo-btn').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  receitaTipoSel = tipo
+}
+
+async function salvarReceita() {
+  const valor = parseBRL(document.getElementById('r-valor').value)
+  const descricaoInput = document.getElementById('r-descricao').value.trim()
+  const dataReceita = document.getElementById('r-data').value
+  const descricao = descricaoInput || receitaTipoSel
+
+  if (!valor || valor <= 0) { toast('Informe o valor da receita!', 'erro'); return }
+
+  try {
+    await api('/receitas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, valor, descricao, dataReceita: dataReceita || null })
+    })
+    fecharModal('modal-receita')
+    toast(`💰 Receita de ${fmt(valor)} registrada!`)
+    carregarInicio()
+  } catch (e) {
+    toast('❌ Erro ao registrar receita: ' + e.message, 'erro')
   }
 }
 

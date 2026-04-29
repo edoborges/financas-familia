@@ -363,6 +363,34 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 }
 .conta-vazia-full span{font-size:2.5rem;display:block;margin-bottom:10px}
 
+/* ── PROJEÇÃO DE PARCELAS ── */
+.projecao-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;margin-bottom:4px;scrollbar-width:none}
+.projecao-row::-webkit-scrollbar{display:none}
+.proj-card{
+  flex-shrink:0;background:#fff;border-radius:14px;padding:14px 16px;
+  min-width:100px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06);
+  border-top:3px solid var(--amarelo);
+}
+.proj-mes{font-size:.75rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.proj-valor{font-size:1rem;font-weight:800;color:#0f172a}
+.proj-label{font-size:.65rem;color:var(--sub);margin-top:3px}
+.proj-vazio{
+  background:#fff;border-radius:14px;padding:14px 18px;width:100%;
+  color:var(--sub);font-size:.85rem;text-align:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.05);border-top:3px solid var(--verde);
+}
+
+/* ── MODAL RECEITA ── */
+.modal-desc{font-size:.83rem;color:var(--sub);margin-bottom:14px;line-height:1.5}
+.receita-tipos{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.rtipo-btn{
+  flex:1;min-width:70px;padding:9px 8px;border:2px solid var(--borda);border-radius:12px;
+  background:#f8fafc;font-size:.8rem;font-weight:600;cursor:pointer;text-align:center;
+  color:var(--sub);transition:all .15s;
+}
+.rtipo-btn.sel{border-color:var(--verde);background:#f0fdf4;color:var(--verde)}
+.btn-verde{background:linear-gradient(135deg,#16a34a,#15803d)!important}
+
 /* ── TOAST ── */
 #toast{
   position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(20px);

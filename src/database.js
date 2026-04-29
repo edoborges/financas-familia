@@ -7,8 +7,10 @@ if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true })
 
 const db = new DatabaseSync(path.join(dataPath, 'financeiro.db'))
 db.exec('PRAGMA journal_mode = WAL')
-// Migração: adiciona pin se não existir
+// Migrações
 try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS usuarios (
@@ -176,9 +178,29 @@ function deletarCartao(id) {
 
 // ===== GASTOS =====
 function registrarGasto(usuarioId, descricao, valor, categoria, formaPagamento, cartaoId = null, parcelas = 1, contaId = null) {
-  const result = db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, parcelas) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, cartaoId, contaId, descricao, valor, categoria, formaPagamento, parcelas)
+  if (parcelas > 1) return registrarCompraParcelada(usuarioId, descricao, valor, categoria, formaPagamento, cartaoId, parcelas, contaId)
+  const result = db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, parcelas, parcela_atual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`).run(usuarioId, cartaoId, contaId, descricao, valor, categoria, formaPagamento, 1)
   if (cartaoId) atualizarGastoCartao(cartaoId, valor)
   return result
+}
+
+function registrarCompraParcelada(usuarioId, descricao, valor, categoria, formaPagamento, cartaoId, numParcelas, contaId) {
+  const valorParcela = +(valor / numParcelas).toFixed(2)
+  const now = new Date()
+  let grupoId = null
+  for (let i = 0; i < numParcelas; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, now.getDate())
+    const dataStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    const desc = `${descricao} (${i+1}/${numParcelas})`
+    const result = db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, data_gasto, parcelas, parcela_atual, grupo_parcela) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, cartaoId, contaId, desc, valorParcela, categoria, formaPagamento, dataStr, numParcelas, i+1, grupoId)
+    if (i === 0) {
+      grupoId = Number(result.lastInsertRowid)
+      db.prepare('UPDATE gastos SET grupo_parcela = ? WHERE id = ?').run(grupoId, grupoId)
+    }
+  }
+  // Só a parcela do mês atual conta na fatura do cartão
+  if (cartaoId) atualizarGastoCartao(cartaoId, valorParcela)
+  return grupoId
 }
 function listarGastosMes(mes = null, ano = null) {
   const now = new Date()
@@ -201,6 +223,38 @@ function ultimosGastos(limite = 10) {
 }
 function gastosPorMes(meses = 6) {
   return db.prepare(`SELECT strftime('%Y-%m', data_gasto) as mes, SUM(valor) as total FROM gastos GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
+}
+
+// ===== RECEITAS =====
+function registrarReceita(usuarioId, valor, descricao = 'Salário', dataReceita = null) {
+  const data = dataReceita || new Date().toISOString().split('T')[0]
+  return db.prepare('INSERT INTO receitas (usuario_id, valor, descricao, data_receita) VALUES (?, ?, ?, ?)').run(usuarioId, valor, descricao, data)
+}
+function listarReceitas(usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE r.usuario_id = ? ORDER BY r.data_receita DESC').all(usuarioId)
+  return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id ORDER BY r.data_receita DESC').all()
+}
+function totalReceitasMes(usuarioId = null) {
+  const now = new Date()
+  const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  if (usuarioId) return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM receitas WHERE usuario_id = ? AND strftime('%Y-%m', data_receita) = ?`).get(usuarioId, mesStr)
+  return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM receitas WHERE strftime('%Y-%m', data_receita) = ?`).get(mesStr)
+}
+function deletarReceita(id) {
+  return db.prepare('DELETE FROM receitas WHERE id = ?').run(id)
+}
+
+// ===== PROJEÇÃO =====
+function projecaoGastosMeses(meses = 4) {
+  const now = new Date()
+  const results = []
+  for (let i = 1; i <= meses; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    const mesStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const row = db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
+    results.push({ mes: mesStr, total: Number(row.total) })
+  }
+  return results
 }
 
 // ===== METAS =====
@@ -249,6 +303,8 @@ function resumoFinanceiro() {
   const usuarios = listarUsuarios()
   const salarioTotal = usuarios.reduce((acc, u) => acc + u.salario, 0)
   const { total: gastosMes } = totalGastosMes()
+  const { total: receitasExtras } = totalReceitasMes()
+  const rendaTotal = salarioTotal + Number(receitasExtras || 0)
   const cartoes = listarCartoes()
   const contas = listarContas()
   const metas = listarMetas()
@@ -257,7 +313,8 @@ function resumoFinanceiro() {
   const saldoContas = contas.reduce((a, c) => a + c.saldo, 0)
   const emprestimos = listarEmprestimos()
   const totalEmDividas = totalDividas()
-  return { salarioTotal, gastosMes, saldoDisponivel: salarioTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas }
+  const projecao = projecaoGastosMeses(4)
+  return { salarioTotal, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao }
 }
 
 // ===== ALERTAS =====
@@ -283,6 +340,8 @@ module.exports = {
   criarEmprestimo, listarEmprestimos, atualizarEmprestimo, editarEmprestimo, deletarEmprestimo, totalDividas,
   registrarGasto, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,
+  registrarReceita, listarReceitas, totalReceitasMes, deletarReceita,
+  projecaoGastosMeses,
   alertasVencimento,
   resumoFinanceiro
 }
