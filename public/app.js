@@ -6,14 +6,59 @@ let graficoInstance = null
 let metaEmojiSel = '🎯'
 let receitaTipoSel = 'Freelance'
 let adminVisualizandoFamiliaId = null  // quando super_admin está vendo uma família
+let visaoAtual = localStorage.getItem('fin_visao') || 'pessoal' // 'pessoal' | 'consolidado'
 
 // Retorna o familiaId ativo: da família que o admin está visualizando, ou do próprio usuário
 function famId() {
   if (adminVisualizandoFamiliaId) return adminVisualizandoFamiliaId
   return usuario?.familia_id || null
 }
-function famQ() { const f = famId(); return f ? '?familiaId=' + f : '' }
-function famQAnd() { const f = famId(); return f ? '&familiaId=' + f : '' }
+
+// Retorna o usuarioId quando na visão pessoal (admin visualizando = sem filtro pessoal)
+function usuIdFiltro() {
+  if (adminVisualizandoFamiliaId) return null // admin vê tudo da família
+  if (visaoAtual === 'pessoal') return usuario?.id || null
+  return null
+}
+
+function famQ() {
+  const parts = []
+  const f = famId()
+  if (f) parts.push('familiaId=' + f)
+  const u = usuIdFiltro()
+  if (u) parts.push('usuarioId=' + u)
+  return parts.length ? '?' + parts.join('&') : ''
+}
+function famQAnd() {
+  const parts = []
+  const f = famId()
+  if (f) parts.push('familiaId=' + f)
+  const u = usuIdFiltro()
+  if (u) parts.push('usuarioId=' + u)
+  return parts.length ? '&' + parts.join('&') : ''
+}
+
+// Toggle pessoal ↔ consolidado
+function toggleVisao() {
+  visaoAtual = visaoAtual === 'pessoal' ? 'consolidado' : 'pessoal'
+  localStorage.setItem('fin_visao', visaoAtual)
+  atualizarBadgeVisao()
+  carregarInicio()
+}
+function atualizarBadgeVisao() {
+  const badge = document.getElementById('b-visao-badge')
+  const btnH = document.getElementById('btn-visao')
+  if (!badge) return
+  if (visaoAtual === 'pessoal') {
+    badge.textContent = '👤 Pessoal'
+    badge.className = 'visao-badge pessoal'
+    if (btnH) btnH.title = 'Visão pessoal — clique para ver da família'
+  } else {
+    badge.textContent = '👨‍👩‍👧 Família'
+    badge.className = 'visao-badge consolidado'
+    if (btnH) btnH.title = 'Visão da família — clique para ver só a sua'
+  }
+}
 
 const AVATARES = ['👨','👩','🧑','👦','👧','👤']
 const SAUDACOES = () => {
@@ -288,6 +333,7 @@ async function mostrarApp() {
 // ── INÍCIO ──
 async function carregarInicio() {
   try {
+    atualizarBadgeVisao()
     const [resumo, gastos] = await Promise.all([api('/resumo' + famQ()), api('/gastos/recentes' + famQ())])
 
     // Balance
@@ -301,10 +347,16 @@ async function carregarInicio() {
     saldoEl.textContent = (positivo ? '+' : '') + fmt(resultado)
     saldoEl.style.color = positivo ? '#4ade80' : '#f87171'
 
-    // Label contextual
+    // Label contextual — menciona visão
+    const visaoLabel = visaoAtual === 'pessoal' ? 'seus dados' : 'dados da família'
     document.getElementById('b-resultado-label').textContent =
-      positivo ? '✅ Economizando este mês' : '⚠️ Acima da renda este mês'
+      rendaTotal === 0
+        ? '⚙️ Configure suas rendas programadas'
+        : positivo ? `✅ Economizando (${visaoLabel})` : `⚠️ Acima da renda (${visaoLabel})`
 
+    const rendaLabel = resumo.rendaProgramada > 0 ? 'Renda prev.' : 'Renda'
+    document.querySelector('#b-renda')?.closest('.pill')?.querySelector('.pill-label')
+      && (document.querySelector('#b-renda').closest('.pill').querySelector('.pill-label').textContent = rendaLabel)
     document.getElementById('b-renda').textContent = fmt(rendaTotal)
     document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
     document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)
@@ -1423,6 +1475,135 @@ async function confirmarImportacaoCSV(usuarioId) {
   } catch (e) {
     toast('❌ Erro ao importar: ' + e.message, 'erro')
   }
+}
+
+// ── RENDAS PROGRAMADAS ──
+let rendaTipoSel = 'mensal'
+
+async function abrirModalRendas() {
+  document.getElementById('renda-form').style.display = 'none'
+  await carregarListaRendas()
+  document.getElementById('modal-rendas').style.display = 'flex'
+}
+
+async function carregarListaRendas() {
+  const fam = famId()
+  const uid = usuario?.id
+  const lista = await api(`/receitas-programadas${fam ? '?familiaId=' + fam : ''}`)
+  const el = document.getElementById('rendas-lista')
+  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
+  if (!lista.length) {
+    el.innerHTML = '<p style="text-align:center;color:#888;font-size:13px;padding:12px">Nenhuma renda configurada ainda.<br>Clique em "+ Adicionar renda" abaixo.</p>'
+    return
+  }
+
+  el.innerHTML = lista.map(r => {
+    const ehMeu = r.usuario_id === uid
+    const tipo_label = r.tipo === 'mensal' ? `Dia ${r.dia_mes || '—'} de cada mês`
+      : r.tipo === 'semanal' ? `Toda ${DIAS_SEMANA[r.dia_semana ?? 1]}`
+      : 'Quinzenal (2×/mês)'
+    return `
+      <div class="renda-item${ehMeu ? '' : ' renda-outro'}">
+        <div class="renda-item-top">
+          <span class="renda-item-desc">${r.descricao}</span>
+          <span class="renda-item-val">${fmt(r.valor)}</span>
+        </div>
+        <div class="renda-item-bot">
+          <span class="renda-item-tipo">${tipo_label}</span>
+          ${r.usuario_nome ? `<span class="renda-item-user">👤 ${r.usuario_nome}</span>` : ''}
+        </div>
+        ${r.observacao ? `<div class="renda-item-obs">📝 ${r.observacao}</div>` : ''}
+        ${ehMeu ? `
+          <div class="renda-item-acoes">
+            <button onclick="editarRenda(${JSON.stringify(r).replace(/"/g,'&quot;')})">✏️ Editar</button>
+            <button class="btn-excluir" onclick="excluirRenda(${r.id})">🗑️ Excluir</button>
+          </div>` : ''}
+      </div>`
+  }).join('')
+}
+
+function abrirFormRenda() {
+  // limpa form para nova renda
+  document.getElementById('rf-id').value = ''
+  document.getElementById('rf-desc').value = ''
+  document.getElementById('rf-valor').value = ''
+  document.getElementById('rf-obs').value = ''
+  document.getElementById('rf-dia-mes').value = ''
+  document.getElementById('rf-dia-semana').value = '5'
+  document.getElementById('renda-form-titulo').textContent = 'Nova renda'
+  rendaTipoSel = 'mensal'
+  document.querySelectorAll('#renda-form .rtipo-btn').forEach((b,i) => b.classList.toggle('sel', i===0))
+  document.getElementById('rf-campo-dia-mes').style.display = ''
+  document.getElementById('rf-campo-dia-semana').style.display = 'none'
+  document.getElementById('renda-form').style.display = 'block'
+  document.getElementById('rf-desc').focus()
+}
+
+function fecharFormRenda() {
+  document.getElementById('renda-form').style.display = 'none'
+}
+
+function selRendaTipo(btn, tipo) {
+  rendaTipoSel = tipo
+  document.querySelectorAll('#renda-form .rtipo-btn').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  document.getElementById('rf-campo-dia-mes').style.display = tipo === 'semanal' ? 'none' : ''
+  document.getElementById('rf-campo-dia-semana').style.display = tipo === 'semanal' ? '' : 'none'
+}
+
+function editarRenda(r) {
+  document.getElementById('rf-id').value = r.id
+  document.getElementById('rf-desc').value = r.descricao
+  document.getElementById('rf-valor').value = String(r.valor).replace('.', ',')
+  document.getElementById('rf-obs').value = r.observacao || ''
+  document.getElementById('rf-dia-mes').value = r.dia_mes || ''
+  document.getElementById('rf-dia-semana').value = r.dia_semana ?? 5
+  document.getElementById('renda-form-titulo').textContent = 'Editar renda'
+  rendaTipoSel = r.tipo || 'mensal'
+  const btns = document.querySelectorAll('#renda-form .rtipo-btn')
+  btns.forEach(b => b.classList.remove('sel'))
+  const tipoIdx = ['mensal','semanal','quinzenal'].indexOf(rendaTipoSel)
+  if (btns[tipoIdx]) btns[tipoIdx].classList.add('sel')
+  document.getElementById('rf-campo-dia-mes').style.display = rendaTipoSel === 'semanal' ? 'none' : ''
+  document.getElementById('rf-campo-dia-semana').style.display = rendaTipoSel === 'semanal' ? '' : 'none'
+  document.getElementById('renda-form').style.display = 'block'
+}
+
+async function salvarRenda() {
+  const id = document.getElementById('rf-id').value
+  const descricao = document.getElementById('rf-desc').value.trim()
+  const valor = parseBRL(document.getElementById('rf-valor').value)
+  const obs = document.getElementById('rf-obs').value.trim()
+  const diaMes = rendaTipoSel !== 'semanal' ? parseInt(document.getElementById('rf-dia-mes').value) || null : null
+  const diaSemana = rendaTipoSel === 'semanal' ? parseInt(document.getElementById('rf-dia-semana').value) : null
+
+  if (!descricao || !valor) { toast('⚠️ Preencha descrição e valor', 'aviso'); return }
+
+  const body = { usuarioId: usuario.id, descricao, valor, tipo: rendaTipoSel, diaMes, diaSemana, observacao: obs }
+
+  try {
+    if (id) {
+      await api(`/receitas-programadas/${id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({...body, ativa: 1}) })
+      toast('✅ Renda atualizada!')
+    } else {
+      await api('/receitas-programadas', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      toast('✅ Renda adicionada!')
+    }
+    fecharFormRenda()
+    await carregarListaRendas()
+    carregarInicio()
+  } catch(e) {
+    toast('❌ ' + e.message, 'erro')
+  }
+}
+
+async function excluirRenda(id) {
+  if (!confirm('Remover esta renda programada?')) return
+  await api(`/receitas-programadas/${id}`, { method: 'DELETE' })
+  toast('🗑️ Removida')
+  await carregarListaRendas()
+  carregarInicio()
 }
 
 // ── RECEITAS ──

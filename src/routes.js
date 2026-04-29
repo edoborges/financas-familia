@@ -163,8 +163,8 @@ router.post('/chat', async (req, res) => {
 
 router.get('/resumo', (req, res) => {
   try {
-    const { familiaId } = req.query
-    res.json(db.resumoFinanceiro(familiaId ? parseInt(familiaId) : null))
+    const { familiaId, usuarioId } = req.query
+    res.json(db.resumoFinanceiro(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch (e) {
     console.error('GET /resumo erro:', e.message)
     res.status(500).json({ erro: e.message })
@@ -201,21 +201,21 @@ router.get('/gastos', (req, res) => {
 
 router.get('/gastos/recentes', (req, res) => {
   try {
-    const { familiaId } = req.query
-    res.json(db.ultimosGastos(30, familiaId ? parseInt(familiaId) : null))
+    const { familiaId, usuarioId } = req.query
+    res.json(db.ultimosGastos(30, familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
 })
 
 router.get('/gastos/categorias', (req, res) => {
-  const { mes, ano, familiaId } = req.query
-  res.json(db.gastosPorCategoria(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null))
+  const { mes, ano, familiaId, usuarioId } = req.query
+  res.json(db.gastosPorCategoria(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.get('/gastos/evolucao', (req, res) => {
-  const { familiaId } = req.query
-  res.json(db.gastosPorMes(6, familiaId ? parseInt(familiaId) : null))
+  const { familiaId, usuarioId } = req.query
+  res.json(db.gastosPorMes(6, familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.get('/cartoes', (req, res) => {
@@ -329,6 +329,38 @@ router.post('/emprestimos/:id/pagar', (req, res) => {
 
 router.delete('/emprestimos/:id', (req, res) => {
   db.deletarEmprestimo(req.params.id)
+  res.json({ ok: true })
+})
+
+// ===== RECEITAS PROGRAMADAS =====
+router.get('/receitas-programadas', (req, res) => {
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarReceitasProgramadas(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+})
+
+router.post('/receitas-programadas', (req, res) => {
+  try {
+    const { usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao } = req.body
+    if (!usuarioId || !descricao || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.adicionarReceitaProgramada(parseInt(usuarioId), descricao, parseFloat(valor), tipo || 'mensal', diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.put('/receitas-programadas/:id', (req, res) => {
+  try {
+    const { descricao, valor, tipo, diaMes, diaSemana, observacao, ativa } = req.body
+    db.atualizarReceitaProgramada(parseInt(req.params.id), descricao, parseFloat(valor), tipo, diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null, ativa ?? 1)
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.delete('/receitas-programadas/:id', (req, res) => {
+  db.removerReceitaProgramada(parseInt(req.params.id))
   res.json({ ok: true })
 })
 

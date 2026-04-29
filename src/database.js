@@ -128,6 +128,20 @@ db.exec(`
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
   );
+
+  CREATE TABLE IF NOT EXISTS receitas_programadas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    descricao TEXT NOT NULL,
+    valor REAL NOT NULL,
+    tipo TEXT DEFAULT 'mensal',
+    dia_mes INTEGER,
+    dia_semana INTEGER,
+    observacao TEXT,
+    ativa INTEGER DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
 `)
 
 // Seed: garante que a família principal existe e usuários legados ficam nela
@@ -184,7 +198,8 @@ function listarUsuarios(familiaId = null) {
 function criarConta(usuarioId, nome, banco, tipo, saldo, cor) {
   return db.prepare('INSERT INTO contas (usuario_id, nome, banco, tipo, saldo, cor) VALUES (?, ?, ?, ?, ?, ?)').run(usuarioId, nome, banco || '', tipo || 'corrente', saldo || 0, cor || '#2980b9')
 }
-function listarContas(familiaId = null) {
+function listarContas(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id WHERE c.usuario_id = ?').all(usuarioId)
   if (familiaId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id WHERE u.familia_id = ?').all(familiaId)
   return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id').all()
 }
@@ -211,7 +226,8 @@ function gerarCoresCartao(nome) {
   const idx = nome.charCodeAt(0) % paletas.length
   return paletas[idx]
 }
-function listarCartoes(familiaId = null) {
+function listarCartoes(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id WHERE c.usuario_id = ?').all(usuarioId)
   if (familiaId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id WHERE u.familia_id = ?').all(familiaId)
   return db.prepare('SELECT c.*, u.nome as usuario_nome FROM cartoes c JOIN usuarios u ON c.usuario_id = u.id').all()
 }
@@ -254,41 +270,56 @@ function registrarCompraParcelada(usuarioId, descricao, valor, categoria, formaP
   return grupoId
 }
 
-function listarGastosMes(mes = null, ano = null, familiaId = null) {
+function listarGastosMes(mes = null, ano = null, familiaId = null, usuarioId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  if (usuarioId) {
+    return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND g.usuario_id = ? ORDER BY g.criado_em DESC`).all(mesStr, usuarioId)
+  }
   if (familiaId) {
     return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ? ORDER BY g.criado_em DESC`).all(mesStr, familiaId)
   }
   return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE strftime('%Y-%m', g.data_gasto) = ? ORDER BY g.criado_em DESC`).all(mesStr)
 }
 
-function totalGastosMes(familiaId = null) {
+function totalGastosMes(familiaId = null, usuarioId = null) {
   const now = new Date()
   const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  if (usuarioId) {
+    return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE usuario_id = ? AND strftime('%Y-%m', data_gasto) = ?`).get(usuarioId, mesStr)
+  }
   if (familiaId) {
     return db.prepare(`SELECT COALESCE(SUM(g.valor), 0) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`).get(familiaId, mesStr)
   }
   return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
 }
 
-function gastosPorCategoria(mes = null, ano = null, familiaId = null) {
+function gastosPorCategoria(mes = null, ano = null, familiaId = null, usuarioId = null) {
   const now = new Date()
   const mesStr = `${ano || now.getFullYear()}-${String(mes || now.getMonth() + 1).padStart(2, '0')}`
+  if (usuarioId) {
+    return db.prepare(`SELECT categoria, SUM(valor) as total, COUNT(*) as quantidade FROM gastos WHERE strftime('%Y-%m', data_gasto) = ? AND usuario_id = ? GROUP BY categoria ORDER BY total DESC`).all(mesStr, usuarioId)
+  }
   if (familiaId) {
     return db.prepare(`SELECT g.categoria, SUM(g.valor) as total, COUNT(*) as quantidade FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ? GROUP BY g.categoria ORDER BY total DESC`).all(mesStr, familiaId)
   }
   return db.prepare(`SELECT categoria, SUM(valor) as total, COUNT(*) as quantidade FROM gastos WHERE strftime('%Y-%m', data_gasto) = ? GROUP BY categoria ORDER BY total DESC`).all(mesStr)
 }
 
-function ultimosGastos(limite = 10, familiaId = null) {
+function ultimosGastos(limite = 10, familiaId = null, usuarioId = null) {
+  if (usuarioId) {
+    return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE g.usuario_id = ? ORDER BY g.criado_em DESC LIMIT ?`).all(usuarioId, limite)
+  }
   if (familiaId) {
     return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id WHERE u.familia_id = ? ORDER BY g.criado_em DESC LIMIT ?`).all(familiaId, limite)
   }
   return db.prepare(`SELECT g.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos g JOIN usuarios u ON g.usuario_id = u.id LEFT JOIN cartoes c ON g.cartao_id = c.id ORDER BY g.criado_em DESC LIMIT ?`).all(limite)
 }
 
-function gastosPorMes(meses = 6, familiaId = null) {
+function gastosPorMes(meses = 6, familiaId = null, usuarioId = null) {
+  if (usuarioId) {
+    return db.prepare(`SELECT strftime('%Y-%m', data_gasto) as mes, SUM(valor) as total FROM gastos WHERE usuario_id = ? GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(usuarioId, meses)
+  }
   if (familiaId) {
     return db.prepare(`SELECT strftime('%Y-%m', g.data_gasto) as mes, SUM(g.valor) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(familiaId, meses)
   }
@@ -304,9 +335,12 @@ function listarReceitas(familiaId = null) {
   if (familiaId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? ORDER BY r.data_receita DESC').all(familiaId)
   return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id ORDER BY r.data_receita DESC').all()
 }
-function totalReceitasMes(familiaId = null) {
+function totalReceitasMes(familiaId = null, usuarioId = null) {
   const now = new Date()
   const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  if (usuarioId) {
+    return db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM receitas WHERE usuario_id = ? AND strftime('%Y-%m', data_receita) = ?`).get(usuarioId, mesStr)
+  }
   if (familiaId) {
     return db.prepare(`SELECT COALESCE(SUM(r.valor), 0) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_receita) = ?`).get(familiaId, mesStr)
   }
@@ -320,6 +354,59 @@ function receitasPorMes(meses = 6, familiaId = null) {
     return db.prepare(`SELECT strftime('%Y-%m', r.data_receita) as mes, SUM(r.valor) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(familiaId, meses)
   }
   return db.prepare(`SELECT strftime('%Y-%m', data_receita) as mes, SUM(valor) as total FROM receitas GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
+}
+
+// ===== RECEITAS PROGRAMADAS =====
+function contarDiasSemanaMes(ano, mes, diaSemana) {
+  // mes: 1-based. diaSemana: 0=Dom,1=Seg,...,6=Sab
+  let count = 0
+  const diasNoMes = new Date(ano, mes, 0).getDate()
+  for (let d = 1; d <= diasNoMes; d++) {
+    if (new Date(ano, mes - 1, d).getDay() === diaSemana) count++
+  }
+  return count
+}
+
+function calcularRendaMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const now = new Date()
+  const m = mes || (now.getMonth() + 1)
+  const a = ano || now.getFullYear()
+  let programadas
+  if (usuarioId) {
+    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE usuario_id = ? AND ativa = 1').all(usuarioId)
+  } else if (familiaId) {
+    programadas = db.prepare(`SELECT rp.* FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? AND rp.ativa = 1`).all(familiaId)
+  } else {
+    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE ativa = 1').all()
+  }
+  let total = 0
+  for (const rp of programadas) {
+    const v = Number(rp.valor)
+    if (rp.tipo === 'mensal') {
+      total += v
+    } else if (rp.tipo === 'semanal') {
+      const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
+      total += v * contarDiasSemanaMes(a, m, ds)
+    } else if (rp.tipo === 'quinzenal') {
+      total += v * 2
+    }
+  }
+  return total
+}
+
+function listarReceitasProgramadas(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT rp.*, u.nome as usuario_nome FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE rp.usuario_id = ? ORDER BY rp.dia_mes ASC, rp.criado_em').all(usuarioId)
+  if (familiaId) return db.prepare('SELECT rp.*, u.nome as usuario_nome FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? ORDER BY u.nome, rp.dia_mes ASC').all(familiaId)
+  return db.prepare('SELECT rp.*, u.nome as usuario_nome FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id ORDER BY rp.criado_em').all()
+}
+function adicionarReceitaProgramada(usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao) {
+  return db.prepare('INSERT INTO receitas_programadas (usuario_id, descricao, valor, tipo, dia_mes, dia_semana, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, tipo || 'mensal', diaMes || null, diaSemana != null ? diaSemana : null, observacao || null)
+}
+function atualizarReceitaProgramada(id, descricao, valor, tipo, diaMes, diaSemana, observacao, ativa) {
+  return db.prepare('UPDATE receitas_programadas SET descricao=?, valor=?, tipo=?, dia_mes=?, dia_semana=?, observacao=?, ativa=? WHERE id=?').run(descricao, valor, tipo, diaMes || null, diaSemana != null ? diaSemana : null, observacao || null, ativa ?? 1, id)
+}
+function removerReceitaProgramada(id) {
+  return db.prepare('DELETE FROM receitas_programadas WHERE id = ?').run(id)
 }
 
 // ===== PROJEÇÃO =====
@@ -387,22 +474,29 @@ function totalDividas(familiaId = null) {
 }
 
 // ===== RESUMO POR FAMÍLIA =====
-function resumoFinanceiro(familiaId = null) {
-  const usuarios = listarUsuarios(familiaId)
-  const salarioTotal = usuarios.reduce((acc, u) => acc + u.salario, 0)
-  const { total: gastosMes } = totalGastosMes(familiaId)
-  const { total: receitasExtras } = totalReceitasMes(familiaId)
-  const rendaTotal = salarioTotal + Number(receitasExtras || 0)
-  const cartoes = listarCartoes(familiaId)
-  const contas = listarContas(familiaId)
+function resumoFinanceiro(familiaId = null, usuarioId = null) {
+  const todosUsuarios = listarUsuarios(familiaId)
+  const usuarios = usuarioId ? todosUsuarios.filter(u => u.id === Number(usuarioId)) : todosUsuarios
+  const salarioTotal = usuarios.reduce((acc, u) => acc + (u.salario || 0), 0)
+
+  // Renda calculada das receitas programadas (prefere programadas; cai back no salario se não tiver)
+  const rendaProgramada = calcularRendaMes(familiaId, usuarioId)
+  const { total: gastosMes } = totalGastosMes(familiaId, usuarioId)
+  const { total: receitasExtras } = totalReceitasMes(familiaId, usuarioId)
+  const rendaBase = rendaProgramada > 0 ? rendaProgramada : salarioTotal
+  const rendaTotal = rendaBase + Number(receitasExtras || 0)
+
+  const cartoes = listarCartoes(familiaId, usuarioId)
+  const contas = listarContas(familiaId, usuarioId)
   const metas = listarMetas(familiaId)
-  const categorias = gastosPorCategoria(null, null, familiaId)
-  const evolucao = gastosPorMes(6, familiaId)
+  const categorias = gastosPorCategoria(null, null, familiaId, usuarioId)
+  const evolucao = gastosPorMes(6, familiaId, usuarioId)
   const saldoContas = contas.reduce((a, c) => a + c.saldo, 0)
   const emprestimos = listarEmprestimos(familiaId)
   const totalEmDividas = totalDividas(familiaId)
   const projecao = projecaoGastosMeses(4, familiaId)
-  return { salarioTotal, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao }
+  const receitasProgramadas = listarReceitasProgramadas(familiaId, usuarioId)
+  return { salarioTotal, rendaProgramada, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao, receitasProgramadas }
 }
 
 // ===== IMPORTAÇÕES =====
@@ -465,6 +559,7 @@ module.exports = {
   registrarGasto, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,
   registrarReceita, listarReceitas, totalReceitasMes, deletarReceita, receitasPorMes,
+  listarReceitasProgramadas, adicionarReceitaProgramada, atualizarReceitaProgramada, removerReceitaProgramada, calcularRendaMes,
   projecaoGastosMeses,
   registrarImportacao, listarImportacoes,
   verificarDuplicataGasto,

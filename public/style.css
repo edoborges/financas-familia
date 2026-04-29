@@ -56,9 +56,17 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .header-right{display:flex;gap:8px}
 .btn-notif,.btn-sair{background:rgba(255,255,255,.1);border:none;color:#fff;padding:7px 12px;border-radius:10px;cursor:pointer;font-size:.8rem;font-weight:500;transition:background .2s}
 .btn-notif:hover,.btn-sair:hover{background:rgba(255,255,255,.18)}
+.btn-visao{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;padding:5px 10px;border-radius:10px;cursor:pointer;font-size:.8rem;font-weight:600;transition:all .2s}
+.btn-visao:hover{background:rgba(255,255,255,.22)}
 
 .app-main{flex:1;overflow-y:auto;padding-bottom:70px}
 .aba{padding:16px;min-height:calc(100dvh - 56px - 62px)}
+
+/* ── VISÃO BADGE ── */
+.balance-top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.visao-badge{font-size:.7rem;font-weight:700;padding:3px 10px;border-radius:20px;cursor:pointer;transition:all .2s;letter-spacing:.3px;border:none}
+.visao-badge.pessoal{background:rgba(99,102,241,.3);color:#a5b4fc;border:1px solid rgba(99,102,241,.4)}
+.visao-badge.consolidado{background:rgba(16,185,129,.25);color:#6ee7b7;border:1px solid rgba(16,185,129,.35)}
 
 /* ── BALANCE CARD ── */
 .balance-card{background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:24px;padding:24px;margin-bottom:16px;color:#fff;position:relative;overflow:hidden}
@@ -549,3 +557,23 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast.sucesso{background:linear-gradient(135deg,#16a34a,#15803d)}
 #toast.erro{background:linear-gradient(135deg,#dc2626,#b91c1c)}
+
+/* ── RENDAS PROGRAMADAS ── */
+.rendas-lista{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;max-height:50vh;overflow-y:auto}
+.renda-item{background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:14px;padding:13px 14px}
+.renda-item.renda-outro{opacity:.75;border-style:dashed}
+.renda-item-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.renda-item-desc{font-weight:700;font-size:.93rem;color:#1e293b}
+.renda-item-val{font-weight:800;color:#059669;font-size:.95rem}
+.renda-item-bot{display:flex;justify-content:space-between;align-items:center}
+.renda-item-tipo{font-size:.75rem;color:#64748b;font-weight:600}
+.renda-item-user{font-size:.72rem;color:#94a3b8}
+.renda-item-obs{font-size:.72rem;color:#94a3b8;margin-top:4px}
+.renda-item-acoes{display:flex;gap:8px;margin-top:8px}
+.renda-item-acoes button{flex:1;padding:6px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;font-size:.78rem;cursor:pointer;font-weight:600;color:#475569}
+.renda-item-acoes .btn-excluir{color:#dc2626;border-color:#fecaca}
+
+.renda-form{background:#f1f5f9;border-radius:14px;padding:14px;margin-top:12px}
+.renda-tipo-row{display:flex;gap:6px;margin-bottom:12px}
+.renda-tipo-row .rtipo-btn{flex:1;padding:7px 4px;font-size:.72rem}
+.rf-campo{margin-bottom:10px}

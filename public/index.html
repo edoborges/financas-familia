@@ -101,6 +101,7 @@
       </div>
     </div>
     <div class="header-right">
+      <button class="btn-visao" id="btn-visao" onclick="toggleVisao()" title="Alternar visão pessoal/família">👤</button>
       <button class="btn-notif" onclick="abrirUpload()" title="Importar extrato ou fatura">📸</button>
       <button class="btn-notif" onclick="abrirMenuFerramentas()" title="Exportar e histórico">⚙️</button>
       <button class="btn-notif" onclick="abrirPlano()">🤖 IA</button>
@@ -135,7 +136,10 @@
 
       <!-- Balanço total -->
       <div class="balance-card">
-        <div class="balance-label" id="b-mes">—</div>
+        <div class="balance-top-row">
+          <div class="balance-label" id="b-mes">—</div>
+          <div id="b-visao-badge" class="visao-badge pessoal" onclick="toggleVisao()">👤 Pessoal</div>
+        </div>
         <div class="balance-valor" id="b-saldo">R$ —</div>
         <div class="balance-resultado-label" id="b-resultado-label"></div>
         <div class="balance-meta">
@@ -565,6 +569,18 @@
       </button>
     </div>
 
+    <div class="ferr-secao">
+      <div class="ferr-titulo">💰 Configurações de renda</div>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirModalRendas()">
+        <span class="ferr-icon">📅</span>
+        <div>
+          <div class="ferr-nome">Rendas Programadas</div>
+          <div class="ferr-sub">Configure dia 15, dia 30, semanal... o app calcula automaticamente</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
     <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="fecharModal('modal-ferramentas')">Fechar</button>
   </div>
 </div>
@@ -652,6 +668,58 @@
     </div>
     <!-- Lista de receitas do mês -->
     <div id="receitas-mes-lista" class="receitas-mes-lista"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL RECEITAS PROGRAMADAS ══ -->
+<div id="modal-rendas" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-rendas')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>📅 Rendas Programadas</h3>
+    <p class="modal-desc">Configure quando e quanto você recebe. O app calcula a renda esperada do mês automaticamente.</p>
+    <div id="rendas-lista" class="rendas-lista"></div>
+    <button class="btn-confirm" style="width:100%;margin-top:8px" onclick="abrirFormRenda()">+ Adicionar renda</button>
+
+    <!-- Formulário de nova renda (oculto inicialmente) -->
+    <div id="renda-form" class="renda-form" style="display:none">
+      <hr style="margin:12px 0;opacity:.15">
+      <h4 id="renda-form-titulo" style="margin:0 0 10px;font-size:14px;color:#aaa">Nova renda</h4>
+      <input id="rf-id" type="hidden" value="">
+      <input id="rf-desc" type="text" placeholder="Ex: Salário Fixo, Comissão, Salário Semanal" />
+
+      <div class="renda-tipo-row">
+        <button class="rtipo-btn sel" onclick="selRendaTipo(this,'mensal')">📅 Mensal</button>
+        <button class="rtipo-btn" onclick="selRendaTipo(this,'semanal')">🔁 Semanal</button>
+        <button class="rtipo-btn" onclick="selRendaTipo(this,'quinzenal')">✌️ Quinzenal</button>
+      </div>
+
+      <div id="rf-campo-dia-mes" class="rf-campo">
+        <label class="input-label">Dia do mês que recebe</label>
+        <input id="rf-dia-mes" type="number" min="1" max="31" placeholder="Ex: 15 ou 30" />
+      </div>
+      <div id="rf-campo-dia-semana" class="rf-campo" style="display:none">
+        <label class="input-label">Dia da semana que recebe</label>
+        <select id="rf-dia-semana">
+          <option value="0">Domingo</option>
+          <option value="1">Segunda-feira</option>
+          <option value="2">Terça-feira</option>
+          <option value="3">Quarta-feira</option>
+          <option value="4">Quinta-feira</option>
+          <option value="5" selected>Sexta-feira</option>
+          <option value="6">Sábado</option>
+        </select>
+      </div>
+
+      <div class="input-prefix"><span>R$</span><input id="rf-valor" type="text" inputmode="decimal" placeholder="Valor por recebimento" /></div>
+      <input id="rf-obs" type="text" placeholder="Observação (opcional, ex: Pode variar)" />
+
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="fecharFormRenda()">Cancelar</button>
+        <button class="btn-confirm btn-verde" onclick="salvarRenda()">💾 Salvar</button>
+      </div>
+    </div>
+
+    <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="fecharModal('modal-rendas')">Fechar</button>
   </div>
 </div>
 
