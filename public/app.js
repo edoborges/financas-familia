@@ -1298,6 +1298,30 @@ function renderCardResultado(data, idx, contas, cartoes) {
       </div>`
   }
 
+  if (data.tipo === 'contrato') {
+    const SUBTIPO_EMOJI = { emprestimo: '💸', casa: '🏠', carro: '🚗', outro: '📦' }
+    const SUBTIPO_LABEL = { emprestimo: 'Empréstimo Pessoal', casa: 'Financiamento Casa', carro: 'Financiamento Carro', outro: 'Outra Dívida' }
+    const emoji = SUBTIPO_EMOJI[data.subtipo] || '💸'
+    const label = SUBTIPO_LABEL[data.subtipo] || 'Dívida'
+    const pagas = data.parcelas_pagas || 0
+    const total = data.total_parcelas || 1
+    const restante = (data.valor_total || 0) - (data.valor_pago || 0)
+    return `
+      <div class="res-card-bloco" style="border-left-color:#7c3aed">
+        <div class="res-card-label">${emoji} Arquivo ${idx+1} — ${label}</div>
+        <div class="res-info-card">
+          <div class="res-info-row"><span>Credor / Banco</span><strong>${data.credor||'—'}</strong></div>
+          <div class="res-info-row"><span>Descrição</span><strong>${data.descricao||'—'}</strong></div>
+          <div class="res-info-row"><span>Valor total</span><strong>${fmt(data.valor_total||0)}</strong></div>
+          <div class="res-info-row"><span>Parcela mensal</span><strong>${fmt(data.parcela_mensal||0)}</strong></div>
+          <div class="res-info-row"><span>Parcelas</span><strong>${pagas > 0 ? `${pagas} pagas de ${total}` : `${total} no total`}</strong></div>
+          ${data.taxa_juros ? `<div class="res-info-row"><span>Taxa de juros</span><strong>${data.taxa_juros}% a.m.</strong></div>` : ''}
+          <div class="res-info-row res-destaque"><span>Saldo devedor</span><strong class="vermelho">${fmt(restante)}</strong></div>
+          ${data.data_vencimento ? `<div class="res-info-row"><span>Próximo vencimento</span><strong>${new Date(data.data_vencimento+'T00:00:00').toLocaleDateString('pt-BR')}</strong></div>` : ''}
+        </div>
+      </div>`
+  }
+
   return `<div class="res-card-bloco">❓ Arquivo ${idx+1}: tipo não reconhecido</div>`
 }
 

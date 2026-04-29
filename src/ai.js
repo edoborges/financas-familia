@@ -197,13 +197,30 @@ Se for uma FATURA DE CARTÃO DE CRÉDITO:
   ]
 }
 
+Se for um CONTRATO ou PROPOSTA DE EMPRÉSTIMO / FINANCIAMENTO (imobiliário, veicular, pessoal, consignado, etc.):
+{
+  "tipo": "contrato",
+  "subtipo": "emprestimo|casa|carro|outro",
+  "credor": "nome do banco ou instituição financeira",
+  "descricao": "descrição resumida (ex: Financiamento Imobiliário, Crédito Pessoal Caixa)",
+  "valor_total": 0.00,
+  "parcela_mensal": 0.00,
+  "total_parcelas": 0,
+  "taxa_juros": 0.00,
+  "data_vencimento": "YYYY-MM-DD da próxima parcela ou vencimento",
+  "valor_pago": 0.00,
+  "parcelas_pagas": 0
+}
+
 Regras importantes:
 - Valores sempre positivos (sem sinal negativo)
 - Para parcelas identifique padrões como "3/12", "Parcela 3 de 12", "03/12x"
 - Se não conseguir identificar parcelas, use parcela_atual:1 total_parcelas:1
 - Datas sempre no formato YYYY-MM-DD
 - Se a data não aparecer claramente, use null
-- Extraia TODOS os itens visíveis na fatura`
+- Extraia TODOS os itens visíveis na fatura
+- Para contratos: taxa_juros em % ao mês (ex: 1.99 para 1,99% a.m.)
+- Para contratos: se houver parcelas já pagas, informe valor_pago e parcelas_pagas`
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',

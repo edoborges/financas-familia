@@ -365,6 +365,25 @@ router.post('/aplicar-analise', (req, res) => {
       db.registrarImportacao(usuarioId, 'imagem_extrato', banco, resultado.aplicados, resultado.duplicatas)
     }
 
+    if (analise.tipo === 'contrato') {
+      const r = db.criarEmprestimo(
+        usuarioId,
+        analise.subtipo || 'emprestimo',
+        analise.descricao || 'Contrato importado',
+        analise.credor || 'Desconhecido',
+        analise.valor_total || 0,
+        analise.parcela_mensal || 0,
+        analise.total_parcelas || 1,
+        analise.taxa_juros || 0,
+        analise.data_vencimento || null
+      )
+      if (analise.valor_pago > 0) {
+        db.atualizarEmprestimo(Number(r.lastInsertRowid), analise.valor_pago, analise.parcelas_pagas || 0)
+      }
+      resultado.aplicados = 1
+      db.registrarImportacao(usuarioId, 'imagem_contrato', analise.credor || 'Contrato', 1, 0)
+    }
+
     if (analise.tipo === 'fatura_cartao') {
       if (cartaoId && analise.valor_total) {
         db.atualizarFaturaCartao(cartaoId, analise.valor_total)
