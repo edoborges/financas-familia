@@ -12,12 +12,17 @@ router.get('/status', (req, res) => {
 router.get('/usuarios', (req, res) => res.json(db.listarUsuarios()))
 
 router.post('/usuarios', (req, res) => {
-  const { nome, salario, telefone: tel, pin } = req.body
-  if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
-  // usa celular fornecido ou gera identificador pelo nome
-  const telefone = (tel && tel.trim()) ? tel.trim().replace(/\D/g, '') : nome.toLowerCase().replace(/\s+/g, '')
-  db.criarUsuario(nome, telefone, salario || 0, pin || '0000')
-  res.json(db.obterUsuario(telefone))
+  try {
+    const { nome, salario, telefone: tel, pin } = req.body
+    if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
+    // usa celular fornecido ou gera identificador pelo nome
+    const telefone = (tel && tel.trim()) ? tel.trim().replace(/\D/g, '') : nome.toLowerCase().replace(/\s+/g, '')
+    db.criarUsuario(nome, telefone, salario || 0, pin || '0000')
+    res.json(db.obterUsuario(telefone))
+  } catch (e) {
+    console.error('POST /usuarios erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.post('/login', (req, res) => {
@@ -81,10 +86,15 @@ router.get('/cartoes', (req, res) => {
 })
 
 router.post('/cartoes', (req, res) => {
-  const { usuarioId, nome, limite, diaFechamento, diaVencimento, bandeira } = req.body
-  if (!usuarioId || !nome || !limite) return res.status(400).json({ erro: 'Dados incompletos' })
-  const result = db.criarCartao(usuarioId, nome, limite, diaFechamento, diaVencimento, bandeira)
-  res.json({ id: result.lastInsertRowid })
+  try {
+    const { usuarioId, nome, limite, diaFechamento, diaVencimento, bandeira } = req.body
+    if (!usuarioId || !nome || !limite) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.criarCartao(usuarioId, nome, limite, diaFechamento, diaVencimento, bandeira)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    console.error('POST /cartoes erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.put('/cartoes/:id/fatura', (req, res) => {
@@ -104,10 +114,15 @@ router.get('/contas', (req, res) => {
 })
 
 router.post('/contas', (req, res) => {
-  const { usuarioId, nome, banco, tipo, saldo, cor } = req.body
-  if (!usuarioId || !nome) return res.status(400).json({ erro: 'Dados incompletos' })
-  const result = db.criarConta(usuarioId, nome, banco, tipo, saldo, cor)
-  res.json({ id: result.lastInsertRowid })
+  try {
+    const { usuarioId, nome, banco, tipo, saldo, cor } = req.body
+    if (!usuarioId || !nome) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.criarConta(usuarioId, nome, banco, tipo, saldo, cor)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    console.error('POST /contas erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.put('/contas/:id', (req, res) => {
@@ -125,10 +140,15 @@ router.delete('/contas/:id', (req, res) => {
 router.get('/metas', (req, res) => res.json(db.listarMetas()))
 
 router.post('/metas', (req, res) => {
-  const { nome, valorAlvo, prazo, descricao, categoria, emoji } = req.body
-  if (!nome || !valorAlvo) return res.status(400).json({ erro: 'Dados incompletos' })
-  const result = db.criarMeta(nome, valorAlvo, prazo, descricao, categoria, emoji)
-  res.json({ id: result.lastInsertRowid })
+  try {
+    const { nome, valorAlvo, prazo, descricao, categoria, emoji } = req.body
+    if (!nome || !valorAlvo) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.criarMeta(nome, valorAlvo, prazo, descricao, categoria, emoji)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    console.error('POST /metas erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.put('/metas/:id', (req, res) => {
@@ -143,10 +163,15 @@ router.get('/emprestimos', (req, res) => {
 })
 
 router.post('/emprestimos', (req, res) => {
-  const { usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento } = req.body
-  if (!usuarioId || !descricao || !credor || !valorTotal) return res.status(400).json({ erro: 'Dados incompletos' })
-  const result = db.criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento)
-  res.json({ id: result.lastInsertRowid })
+  try {
+    const { usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento } = req.body
+    if (!usuarioId || !descricao || !credor || !valorTotal) return res.status(400).json({ erro: 'Dados incompletos' })
+    const result = db.criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento)
+    res.json({ id: Number(result.lastInsertRowid) })
+  } catch (e) {
+    console.error('POST /emprestimos erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.put('/emprestimos/:id', (req, res) => {

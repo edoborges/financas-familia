@@ -29,7 +29,15 @@ function parseBRL(str) {
     .replace(',', '.')         // troca vírgula decimal por ponto
   return parseFloat(s) || 0
 }
-const api = (url,opts) => fetch('/api'+url,opts).then(r=>r.json())
+const api = async (url, opts) => {
+  const r = await fetch('/api' + url, opts)
+  const data = await r.json().catch(() => ({ erro: `HTTP ${r.status}` }))
+  if (!r.ok) {
+    console.error(`API ${opts?.method||'GET'} ${url} →`, r.status, data)
+    throw Object.assign(new Error(data.erro || `Erro ${r.status}`), { status: r.status, data })
+  }
+  return data
+}
 
 // ── INIT ──
 let USUARIOS_CACHE = []
@@ -246,38 +254,41 @@ async function mostrarApp() {
 
 // ── INÍCIO ──
 async function carregarInicio() {
-  const resumo = await api('/resumo')
-  const gastos = await api('/gastos/recentes')
+  try {
+    const [resumo, gastos] = await Promise.all([api('/resumo'), api('/gastos/recentes')])
 
-  // Balance
-  const saldo = resumo.salarioTotal - resumo.gastosMes
-  const pct = resumo.salarioTotal > 0 ? ((resumo.gastosMes/resumo.salarioTotal)*100).toFixed(0) : 0
-  document.getElementById('b-saldo').textContent = fmt(saldo)
-  document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal)
-  document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes)
-  document.getElementById('b-contas').textContent = fmt(resumo.saldoContas)
-  document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
-  const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
-  const dividas = resumo.totalEmDividas > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
-  document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
+    // Balance
+    const saldo = resumo.salarioTotal - resumo.gastosMes
+    const pct = resumo.salarioTotal > 0 ? ((resumo.gastosMes/resumo.salarioTotal)*100).toFixed(0) : 0
+    document.getElementById('b-saldo').textContent = fmt(saldo)
+    document.getElementById('b-renda').textContent = fmt(resumo.salarioTotal)
+    document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes)
+    document.getElementById('b-contas').textContent = fmt(resumo.saldoContas)
+    document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
+    const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
+    const dividas = resumo.totalEmDividas > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
+    document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
 
-  // Cartões
-  renderCartoesScroll(resumo.cartoes)
+    // Cartões
+    renderCartoesScroll(resumo.cartoes)
 
-  // Contas
-  renderContasRow(resumo.contas)
+    // Contas
+    renderContasRow(resumo.contas)
 
-  // Empréstimos
-  renderEmprestimos()
+    // Empréstimos
+    renderEmprestimos()
 
-  // Evolução mini
-  renderEvolucaoMini(resumo.evolucao)
+    // Evolução mini
+    renderEvolucaoMini(resumo.evolucao)
 
-  // Transações
-  renderTransacoes(gastos.slice(0,8))
+    // Transações
+    renderTransacoes(gastos.slice(0,8))
 
-  // Alertas de vencimento
-  verificarAlertas()
+    // Alertas de vencimento
+    verificarAlertas()
+  } catch (e) {
+    console.error('carregarInicio erro:', e)
+  }
 }
 
 // ── ALERTAS ──
@@ -751,12 +762,16 @@ async function salvarMeta() {
   const valorAlvo = parseBRL(document.getElementById('m-valor').value)
   const prazo = document.getElementById('m-prazo').value || null
   if (!nome || !valorAlvo) { alert('Preencha nome e valor!'); return }
-  await api('/metas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,valorAlvo,prazo,emoji:metaEmojiSel})})
-  fecharModal('modal-meta')
-  document.getElementById('m-nome').value = ''
-  document.getElementById('m-valor').value = ''
-  document.getElementById('m-prazo').value = ''
-  carregarMetas()
+  try {
+    await api('/metas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome, valorAlvo, prazo, emoji: metaEmojiSel }) })
+    fecharModal('modal-meta')
+    document.getElementById('m-nome').value = ''
+    document.getElementById('m-valor').value = ''
+    document.getElementById('m-prazo').value = ''
+    carregarMetas()
+  } catch (e) {
+    alert('Erro ao salvar meta: ' + e.message)
+  }
 }
 
 async function salvarCartao() {
@@ -765,12 +780,16 @@ async function salvarCartao() {
   const diaFechamento = parseInt(document.getElementById('c-fecha').value) || 1
   const diaVencimento = parseInt(document.getElementById('c-vence').value) || 10
   if (!nome || !limite) { alert('Preencha nome e limite!'); return }
-  await api('/cartoes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:usuario.id,nome,limite,diaFechamento,diaVencimento})})
-  fecharModal('modal-cartao')
-  document.getElementById('c-nome').value = ''
-  document.getElementById('c-limite').value = ''
-  carregarInicio()
-  carregarCartoes()
+  try {
+    await api('/cartoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, limite, diaFechamento, diaVencimento }) })
+    fecharModal('modal-cartao')
+    document.getElementById('c-nome').value = ''
+    document.getElementById('c-limite').value = ''
+    carregarInicio()
+    carregarCartoes()
+  } catch (e) {
+    alert('Erro ao salvar cartão: ' + e.message)
+  }
 }
 
 async function salvarConta() {
@@ -779,12 +798,16 @@ async function salvarConta() {
   const tipo = document.getElementById('ct-tipo').value
   const saldo = parseBRL(document.getElementById('ct-saldo').value)
   if (!nome) { alert('Informe o nome da conta!'); return }
-  await api('/contas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarioId:usuario.id,nome,banco,tipo,saldo})})
-  fecharModal('modal-conta')
-  document.getElementById('ct-nome').value = ''
-  document.getElementById('ct-banco').value = ''
-  document.getElementById('ct-saldo').value = ''
-  carregarInicio()
+  try {
+    await api('/contas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, banco, tipo, saldo }) })
+    fecharModal('modal-conta')
+    document.getElementById('ct-nome').value = ''
+    document.getElementById('ct-banco').value = ''
+    document.getElementById('ct-saldo').value = ''
+    carregarInicio()
+  } catch (e) {
+    alert('Erro ao salvar conta: ' + e.message)
+  }
 }
 
 // ── EMPRÉSTIMOS ──
