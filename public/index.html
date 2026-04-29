@@ -145,9 +145,9 @@
           <span class="acao-icon">➕</span>
           <span>Lançar</span>
         </button>
-        <button class="acao-btn" onclick="abrirModalConta()">
+        <button class="acao-btn" onclick="mostrarAba('contas'); navBtn('nav-contas')">
           <span class="acao-icon">🏦</span>
-          <span>Conta</span>
+          <span>Contas</span>
         </button>
         <button class="acao-btn" onclick="mostrarAba('metas'); navBtn('nav-metas')">
           <span class="acao-icon">🎯</span>
@@ -224,6 +224,30 @@
       </div>
     </section>
 
+    <!-- ── ABA CONTAS ── -->
+    <section id="aba-contas" class="aba" style="display:none">
+
+      <!-- Card saldo total -->
+      <div class="contas-total-card">
+        <div class="contas-total-label">Saldo total em contas</div>
+        <div class="contas-total-valor" id="contas-total-valor">R$ —</div>
+        <div class="contas-total-sub" id="contas-total-sub">— contas cadastradas</div>
+      </div>
+
+      <!-- Lista de contas -->
+      <div id="contas-lista-full" class="contas-lista-full"></div>
+
+      <!-- Botão adicionar -->
+      <button class="btn-add-full" onclick="abrirModalConta()">＋ Adicionar Conta</button>
+
+      <!-- Movimentações recentes -->
+      <div class="section-title-row" style="margin-top:20px">
+        <span>📋 Movimentações Recentes</span>
+      </div>
+      <div id="contas-transacoes" class="transacoes-lista"></div>
+
+    </section>
+
     <!-- ── ABA PLANEJAMENTO ── -->
     <section id="aba-metas" class="aba" style="display:none">
 
@@ -265,20 +289,24 @@
   <!-- NAV BOTTOM -->
   <nav class="bottom-nav">
     <button id="nav-inicio" class="nav-btn active" onclick="mostrarAba('inicio'); navBtn('nav-inicio')">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       <small>Início</small>
     </button>
     <button id="nav-gastos" class="nav-btn" onclick="mostrarAba('gastos'); navBtn('nav-gastos')">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
       <small>Lançar</small>
     </button>
-    <button id="nav-metas" class="nav-btn" onclick="mostrarAba('metas'); navBtn('nav-metas')">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
-      <small>Metas</small>
+    <button id="nav-contas" class="nav-btn" onclick="mostrarAba('contas'); navBtn('nav-contas')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 10v7h3v-7H4zm6 0v7h3v-7h-3zm-8 12h19v-3H2v3zm14-12v7h3v-7h-3zM11.5 1L2 6v2h19V6l-9.5-5z"/></svg>
+      <small>Contas</small>
     </button>
     <button id="nav-cartoes" class="nav-btn" onclick="mostrarAba('cartoes'); navBtn('nav-cartoes')">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>
       <small>Cartões</small>
+    </button>
+    <button id="nav-metas" class="nav-btn" onclick="mostrarAba('metas'); navBtn('nav-metas')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+      <small>Metas</small>
     </button>
   </nav>
 </div>

@@ -689,7 +689,80 @@ function mostrarAba(nome) {
   if (nome === 'inicio') carregarInicio()
   if (nome === 'metas') carregarMetas()
   if (nome === 'cartoes') carregarCartoes()
+  if (nome === 'contas') carregarContas()
   document.getElementById('app-main').scrollTop = 0
+}
+
+// ── ABA CONTAS ──
+const TIPO_LABEL_CONTA = { corrente: 'Conta Corrente', poupanca: 'Poupança', investimento: 'Investimento' }
+const TIPO_ICONE_CONTA = { corrente: '🏦', poupanca: '🐷', investimento: '📈' }
+const CORES_CONTA = ['#2563eb','#16a34a','#7c3aed','#d97706','#0891b2','#db2777']
+
+async function carregarContas() {
+  try {
+    const [contas, gastos] = await Promise.all([api('/contas'), api('/gastos/recentes')])
+
+    // — Saldo total —
+    const total = contas.reduce((a, c) => a + Number(c.saldo), 0)
+    document.getElementById('contas-total-valor').textContent = fmt(total)
+    const n = contas.length
+    document.getElementById('contas-total-sub').textContent =
+      n === 0 ? 'Nenhuma conta cadastrada' : `${n} conta${n > 1 ? 's' : ''} cadastrada${n > 1 ? 's' : ''}`
+
+    // — Lista de contas —
+    const el = document.getElementById('contas-lista-full')
+    if (!contas.length) {
+      el.innerHTML = `<div class="conta-vazia-full"><span>🏦</span>Nenhuma conta cadastrada ainda.<br><small>Adicione sua primeira conta abaixo.</small></div>`
+    } else {
+      el.innerHTML = contas.map((c, i) => {
+        const cor = c.saldo < 0 ? '#dc2626' : CORES_CONTA[i % CORES_CONTA.length]
+        const corSaldo = c.saldo < 0 ? '#dc2626' : '#16a34a'
+        const icone = TIPO_ICONE_CONTA[c.tipo] || '🏦'
+        const tipoLabel = TIPO_LABEL_CONTA[c.tipo] || c.tipo
+        const badgeTipo = { corrente: '#2563eb', poupanca: '#16a34a', investimento: '#7c3aed' }[c.tipo] || '#64748b'
+        const cJson = encodeURIComponent(JSON.stringify(c))
+        return `
+        <div class="conta-card-full${c.saldo < 0 ? ' negativo' : ''}" style="border-left-color:${cor}"
+             onclick="abrirEditarConta(JSON.parse(decodeURIComponent('${cJson}')))">
+          <div class="ccf-esq">
+            <div class="ccf-icone" style="background:${cor}18;color:${cor}">${icone}</div>
+            <div>
+              <div class="ccf-nome">${c.nome}</div>
+              <div class="ccf-banco">${c.banco || tipoLabel}</div>
+              <span class="ccf-badge" style="background:${badgeTipo}18;color:${badgeTipo}">${tipoLabel}</span>
+            </div>
+          </div>
+          <div class="ccf-dir">
+            <div class="ccf-saldo" style="color:${corSaldo}">${fmt(c.saldo)}</div>
+            <div class="ccf-tipo">toque para editar</div>
+          </div>
+        </div>`
+      }).join('')
+    }
+
+    // — Movimentações recentes —
+    const txEl = document.getElementById('contas-transacoes')
+    if (!gastos.length) {
+      txEl.innerHTML = `<div class="tx-vazio">📭 Nenhuma movimentação ainda.</div>`
+    } else {
+      txEl.innerHTML = gastos.slice(0, 10).map(g => {
+        const data = new Date(g.data_gasto + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+        const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
+        return `
+        <div class="tx-item">
+          <div class="tx-emoji">${EMOJI_CAT[g.categoria] || '📦'}</div>
+          <div class="tx-info">
+            <div class="tx-desc">${g.descricao}</div>
+            <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
+          </div>
+          <div class="tx-valor">- ${fmt(g.valor)}</div>
+        </div>`
+      }).join('')
+    }
+  } catch (e) {
+    console.error('carregarContas:', e)
+    toast('⚠️ Erro ao carregar contas: ' + e.message, 'erro')
+  }
 }
 
 function navBtn(id) {
@@ -729,6 +802,7 @@ async function salvarEdicaoConta() {
     toast(`✅ Conta "${nome}" atualizada!`)
     const contas = await api('/contas')
     renderContasRow(contas)
+    carregarContas()
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao atualizar conta: ' + e.message, 'erro')
@@ -742,6 +816,7 @@ async function deletarContaAtual() {
     toast('🗑️ Conta excluída')
     const contas = await api('/contas')
     renderContasRow(contas)
+    carregarContas()
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao excluir: ' + e.message, 'erro')
@@ -836,10 +911,9 @@ async function salvarConta() {
     document.getElementById('ct-banco').value = ''
     document.getElementById('ct-saldo').value = ''
     toast(`✅ Conta "${nome}" adicionada!`)
-    // Atualiza a seção de contas diretamente (não depende do /resumo)
     const contas = await api('/contas')
     renderContasRow(contas)
-    // Atualiza o resto da página em segundo plano
+    carregarContas()
     carregarInicio()
   } catch (e) {
     toast('❌ Erro ao salvar conta: ' + e.message, 'erro')

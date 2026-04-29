@@ -320,6 +320,49 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .pin-troca-section{background:#f8fafc;border-radius:12px;padding:14px;margin-bottom:12px}
 .pin-troca-section .input-label{margin-bottom:8px}
 
+/* ── ABA CONTAS ── */
+.contas-total-card{
+  background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#1e293b 100%);
+  border-radius:20px;padding:28px 24px;margin-bottom:20px;color:#fff;text-align:center;
+  box-shadow:0 8px 32px rgba(15,23,42,.25);
+}
+.contas-total-label{font-size:.75rem;opacity:.65;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px}
+.contas-total-valor{font-size:2.2rem;font-weight:800;letter-spacing:-.5px;margin-bottom:6px}
+.contas-total-sub{font-size:.8rem;opacity:.55}
+
+.contas-lista-full{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+
+.conta-card-full{
+  background:#fff;border-radius:16px;padding:16px 18px;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 2px 12px rgba(0,0,0,.06);cursor:pointer;
+  transition:transform .12s,box-shadow .12s;
+  border-left:4px solid var(--azul);
+}
+.conta-card-full:active{transform:scale(.98);box-shadow:0 1px 6px rgba(0,0,0,.08)}
+.conta-card-full.negativo{border-left-color:var(--vermelho)}
+
+.ccf-esq{display:flex;align-items:center;gap:14px}
+.ccf-icone{
+  width:46px;height:46px;border-radius:13px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:1.4rem;flex-shrink:0;
+}
+.ccf-nome{font-size:.97rem;font-weight:700;color:#0f172a;margin-bottom:3px}
+.ccf-banco{font-size:.78rem;color:var(--sub)}
+.ccf-badge{display:inline-block;font-size:.68rem;font-weight:600;padding:2px 8px;border-radius:20px;margin-top:4px}
+
+.ccf-dir{text-align:right}
+.ccf-saldo{font-size:1.05rem;font-weight:800;margin-bottom:3px}
+.ccf-tipo{font-size:.72rem;color:var(--sub)}
+
+.conta-vazia-full{
+  text-align:center;padding:40px 24px;color:var(--sub);
+  background:#fff;border-radius:16px;font-size:.95rem;line-height:2;
+  border:2px dashed var(--borda);
+}
+.conta-vazia-full span{font-size:2.5rem;display:block;margin-bottom:10px}
+
 /* ── TOAST ── */
 #toast{
   position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(20px);
