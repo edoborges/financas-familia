@@ -274,9 +274,19 @@ async function carregarInicio() {
 
     // Balance
     const rendaTotal = resumo.rendaTotal || resumo.salarioTotal || 0
-    const saldo = rendaTotal - (resumo.gastosMes || 0)
+    const resultado = rendaTotal - (resumo.gastosMes || 0)
     const pct = rendaTotal > 0 ? (((resumo.gastosMes||0)/rendaTotal)*100).toFixed(0) : 0
-    document.getElementById('b-saldo').textContent = fmt(saldo)
+    const positivo = resultado >= 0
+
+    // Número principal: resultado do mês (+ ou -)
+    const saldoEl = document.getElementById('b-saldo')
+    saldoEl.textContent = (positivo ? '+' : '') + fmt(resultado)
+    saldoEl.style.color = positivo ? '#4ade80' : '#f87171'
+
+    // Label contextual
+    document.getElementById('b-resultado-label').textContent =
+      positivo ? '✅ Economizando este mês' : '⚠️ Acima da renda este mês'
+
     document.getElementById('b-renda').textContent = fmt(rendaTotal)
     document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
     document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)

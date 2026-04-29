@@ -46,15 +46,109 @@ async function processarMensagem(usuarioId, mensagem) {
   }
 
   const cartoes = db.listarCartoes(usuario.id)
+  const contas = db.listarContas(usuario.id)
   const { total: gastosMes } = db.totalGastosMes(usuario.id)
+
+  // Detecção direta por regex (mais rápido e confiável que IA para esses casos)
+  const acaoConta = detectarAcaoConta(msgLower, cartoes, contas)
+  if (acaoConta) return executarAcaoConta(acaoConta, usuario, cartoes, contas)
 
   const resultado = await interpretarMensagem(mensagem, usuario.nome, {
     cartoes,
+    contas,
     salario: usuario.salario,
     gastosMes
   })
 
   return await executarAcao(resultado, usuario)
+}
+
+// ── DETECÇÃO DE CONTA/CARTÃO POR REGEX ──
+function extrairValor(texto) {
+  const m = texto.match(/r?\$\s*([\d.,]+)|(?:^|\s)([\d]{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)\b/)
+  if (!m) return 0
+  const raw = (m[1] || m[2] || '').replace(/\./g, '').replace(',', '.')
+  return parseFloat(raw) || 0
+}
+
+function detectarAcaoConta(msgLower, cartoes, contas) {
+  const valor = extrairValor(msgLower)
+  if (!valor || valor <= 0) return null
+
+  // ── Fatura de cartão ──
+  // "fatura [cartão] R$X" | "fatura do/da [cartão] R$X" | "[cartão] R$X de fatura"
+  const faturaM = msgLower.match(/fatura\s+(?:do\s+|da\s+)?(.+?)\s+(?:r?\$|é|está|ficou|:|\d)/)
+    || msgLower.match(/(.+?)\s+(?:tem|com)\s+r?\$?[\s]?[\d.,]+\s+de\s+fatura/)
+  if (faturaM) {
+    const nome = (faturaM[1] || '').trim()
+    const cartao = cartoes.find(c => c.nome.toLowerCase().includes(nome) || nome.includes(c.nome.toLowerCase()))
+    if (cartao) return { tipo: 'cartao_fatura', cartao, valor }
+  }
+
+  // ── Criar nova conta ──
+  // "abri/abrir/nova conta [banco] R$X"
+  const criarM = msgLower.match(/(?:abri|abrir|nova|novo|cri(?:ei|ar))\s+(?:uma?\s+)?conta\s+(?:no\s+|na\s+|em\s+|do\s+|da\s+)?(.+?)\s+(?:com\s+)?r?\$?[\s]?[\d.,]+/)
+  if (criarM) {
+    const banco = criarM[1].trim()
+    const tipoConta = /poupan/i.test(banco) ? 'poupanca' : /invest/i.test(banco) ? 'investimento' : 'corrente'
+    return { tipo: 'criar_conta', banco, tipoConta, valor }
+  }
+
+  // ── Atualizar saldo de conta ──
+  // "saldo [banco] R$X" | "[banco] tem R$X" | "conta [banco] R$X" | "meu/minha [banco] ficou/tem R$X"
+  const saldoPatterns = [
+    /^saldo\s+(?:d[ao]\s+)?(?:conta\s+)?(.+?)\s*(?:r?\$|é|:|\d)/,
+    /^conta\s+(?:d[ao]\s+)?(.+?)\s+r?\$/,
+    /^(?:meu|minha)\s+(.+?)\s+(?:tem|ficou|está|agora)\s+r?\$/,
+    /^(.+?)\s+(?:tem|ficou|está com|agora tem)\s+r?\$/,
+  ]
+  for (const re of saldoPatterns) {
+    const m = msgLower.match(re)
+    if (!m) continue
+    const nome = m[1].replace(/\s+(?:tem|ficou|está|agora|com|saldo|corrente|poupança|poupanca).*$/i, '').trim()
+    if (!nome || nome.length < 2) continue
+    const conta = contas.find(c =>
+      c.nome.toLowerCase().includes(nome) ||
+      (c.banco || '').toLowerCase().includes(nome) ||
+      nome.includes(c.nome.toLowerCase()) ||
+      nome.includes((c.banco || '').toLowerCase())
+    )
+    return { tipo: conta ? 'atualizar_conta' : 'criar_conta', conta, banco: nome, valor,
+      tipoConta: /poupan/i.test(msgLower) ? 'poupanca' : /invest/i.test(msgLower) ? 'investimento' : 'corrente' }
+  }
+
+  return null
+}
+
+function executarAcaoConta(acao, usuario, cartoes, contas) {
+  switch (acao.tipo) {
+    case 'cartao_fatura': {
+      db.atualizarFaturaCartao(acao.cartao.id, acao.valor)
+      const disp = acao.cartao.limite - acao.valor
+      return {
+        resposta: `💳 Fatura do *${acao.cartao.nome}* atualizada para R$${acao.valor.toFixed(2)}\n💚 Disponível: R$${disp.toFixed(2)}`,
+        tipo: 'sucesso'
+      }
+    }
+    case 'atualizar_conta': {
+      db.atualizarSaldoConta(acao.conta.id, acao.valor)
+      return {
+        resposta: `🏦 Saldo de *${acao.conta.nome}* atualizado para R$${acao.valor.toFixed(2)}`,
+        tipo: 'sucesso'
+      }
+    }
+    case 'criar_conta': {
+      const nomeConta = acao.banco.charAt(0).toUpperCase() + acao.banco.slice(1)
+      db.criarConta(usuario.id, nomeConta, nomeConta, acao.tipoConta, acao.valor, '#2563eb')
+      const tipoLabel = { corrente: 'Corrente', poupanca: 'Poupança', investimento: 'Investimento' }[acao.tipoConta]
+      return {
+        resposta: `🏦 Conta *${nomeConta}* (${tipoLabel}) criada com saldo R$${acao.valor.toFixed(2)}!\n\nAcesse a aba Contas para ver. ✅`,
+        tipo: 'sucesso'
+      }
+    }
+    default:
+      return null
+  }
 }
 
 async function executarAcao(resultado, usuario) {
@@ -96,6 +190,48 @@ async function executarAcao(resultado, usuario) {
         tipo: 'gasto',
         valor: resultado.valor,
         categoria: resultado.categoria
+      }
+    }
+
+    case 'conta': {
+      const contas = db.listarContas(usuario.id)
+      const banco = resultado.banco || ''
+      const valor = resultado.valor || 0
+      if (!valor) return { resposta: resultado.resposta || 'Valor não identificado.', tipo: 'info' }
+
+      if (resultado.acao === 'criar') {
+        const nome = resultado.nome || banco.charAt(0).toUpperCase() + banco.slice(1)
+        const tipoConta = resultado.tipo_conta || 'corrente'
+        db.criarConta(usuario.id, nome, banco, tipoConta, valor, '#2563eb')
+        const tipoLabel = { corrente: 'Corrente', poupanca: 'Poupança', investimento: 'Investimento' }[tipoConta]
+        return { resposta: `🏦 Conta *${nome}* (${tipoLabel}) criada com R$${valor.toFixed(2)}! ✅`, tipo: 'sucesso' }
+      }
+      // atualizar_saldo
+      const conta = contas.find(c =>
+        c.nome.toLowerCase().includes(banco.toLowerCase()) ||
+        (c.banco || '').toLowerCase().includes(banco.toLowerCase())
+      )
+      if (conta) {
+        db.atualizarSaldoConta(conta.id, valor)
+        return { resposta: `🏦 Saldo de *${conta.nome}* atualizado para R$${valor.toFixed(2)} ✅`, tipo: 'sucesso' }
+      }
+      // Não encontrou → cria
+      const nome = banco.charAt(0).toUpperCase() + banco.slice(1)
+      db.criarConta(usuario.id, nome, banco, resultado.tipo_conta || 'corrente', valor, '#2563eb')
+      return { resposta: `🏦 Conta *${nome}* criada com R$${valor.toFixed(2)}! ✅`, tipo: 'sucesso' }
+    }
+
+    case 'cartao_fatura': {
+      const cartoes = db.listarCartoes(usuario.id)
+      const nomeCartao = resultado.nome_cartao || ''
+      const valor = resultado.valor || 0
+      const cartao = cartoes.find(c => c.nome.toLowerCase().includes(nomeCartao.toLowerCase()))
+      if (!cartao) return { resposta: `❌ Cartão "${nomeCartao}" não encontrado. Verifique o nome.`, tipo: 'erro' }
+      db.atualizarFaturaCartao(cartao.id, valor)
+      const disp = cartao.limite - valor
+      return {
+        resposta: `💳 Fatura do *${cartao.nome}* atualizada para R$${valor.toFixed(2)}\n💚 Disponível: R$${disp.toFixed(2)}`,
+        tipo: 'sucesso'
       }
     }
 
@@ -238,6 +374,12 @@ function formatarAjuda() {
 • "gastos" — ver lançamentos
 • "cartões" — limites
 • "metas" — progresso
+
+🏦 Contas e cartões:
+• "Meu Nubank tem R$2.300"
+• "Saldo Itaú R$1.500"
+• "Abri conta Bradesco R$800"
+• "Fatura do Nubank R$1.200"
 
 ⚙️ Configurar:
 • "Meu salário é R$3000"

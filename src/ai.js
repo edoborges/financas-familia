@@ -9,9 +9,10 @@ const CATEGORIAS = [
 ]
 
 async function interpretarMensagem(mensagem, nomeUsuario, contexto = {}) {
-  const { cartoes = [], salario = 0, gastosMes = 0 } = contexto
+  const { cartoes = [], contas = [], salario = 0, gastosMes = 0 } = contexto
 
   const listaCartoes = cartoes.map(c => `${c.nome} (limite R$${c.limite}, gasto R$${c.gasto_atual})`).join(', ') || 'nenhum cadastrado'
+  const listaContas = contas.map(c => `${c.nome} - ${c.banco || c.tipo} (saldo R$${c.saldo})`).join(', ') || 'nenhuma cadastrada'
 
   const prompt = `Você é um assistente financeiro pessoal brasileiro. Analise a mensagem de ${nomeUsuario} e responda em JSON.
 
@@ -19,6 +20,7 @@ CONTEXTO DO USUÁRIO:
 - Salário: R$${salario}
 - Gastos este mês: R$${gastosMes}
 - Cartões: ${listaCartoes}
+- Contas bancárias: ${listaContas}
 
 MENSAGEM: "${mensagem}"
 
@@ -53,6 +55,35 @@ Se for CADASTRO (cartão, salário, meta):
   "subtipo": "cartao|salario|meta",
   "dados": {},
   "resposta": "mensagem explicando o que foi entendido"
+}
+
+Se for ATUALIZAÇÃO DE SALDO DE CONTA BANCÁRIA (ex: "meu Nubank tem R$2.300", "saldo Itaú R$1500", "conta poupança R$800"):
+{
+  "tipo": "conta",
+  "acao": "atualizar_saldo",
+  "banco": "nome do banco/conta",
+  "valor": 0.00,
+  "tipo_conta": "corrente|poupanca|investimento",
+  "resposta": "mensagem de confirmação"
+}
+
+Se for CRIAÇÃO DE NOVA CONTA (ex: "abri conta no Itaú com R$1500", "nova conta Bradesco poupança R$300"):
+{
+  "tipo": "conta",
+  "acao": "criar",
+  "banco": "nome do banco",
+  "nome": "nome da conta",
+  "valor": 0.00,
+  "tipo_conta": "corrente|poupanca|investimento",
+  "resposta": "mensagem de confirmação"
+}
+
+Se for ATUALIZAÇÃO DE FATURA DE CARTÃO (ex: "fatura do Nubank R$1.200", "meu Bradesco tem R$800 de fatura"):
+{
+  "tipo": "cartao_fatura",
+  "nome_cartao": "nome do cartão",
+  "valor": 0.00,
+  "resposta": "mensagem de confirmação"
 }
 
 Se for AJUDA ou não reconhecido:
