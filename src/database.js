@@ -410,14 +410,16 @@ function removerReceitaProgramada(id) {
 }
 
 // ===== PROJEÇÃO =====
-function projecaoGastosMeses(meses = 4, familiaId = null) {
+function projecaoGastosMeses(meses = 4, familiaId = null, usuarioId = null) {
   const now = new Date()
   const results = []
   for (let i = 1; i <= meses; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
     const mesStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     let row
-    if (familiaId) {
+    if (usuarioId) {
+      row = db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ? AND usuario_id = ?`).get(mesStr, usuarioId)
+    } else if (familiaId) {
       row = db.prepare(`SELECT COALESCE(SUM(g.valor), 0) as total FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE strftime('%Y-%m', g.data_gasto) = ? AND u.familia_id = ?`).get(mesStr, familiaId)
     } else {
       row = db.prepare(`SELECT COALESCE(SUM(valor), 0) as total FROM gastos WHERE strftime('%Y-%m', data_gasto) = ?`).get(mesStr)
@@ -494,7 +496,7 @@ function resumoFinanceiro(familiaId = null, usuarioId = null) {
   const saldoContas = contas.reduce((a, c) => a + c.saldo, 0)
   const emprestimos = listarEmprestimos(familiaId)
   const totalEmDividas = totalDividas(familiaId)
-  const projecao = projecaoGastosMeses(4, familiaId)
+  const projecao = projecaoGastosMeses(4, familiaId, usuarioId)
   const receitasProgramadas = listarReceitasProgramadas(familiaId, usuarioId)
   return { salarioTotal, rendaProgramada, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao, receitasProgramadas }
 }

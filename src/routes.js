@@ -394,8 +394,8 @@ router.get('/receitas/evolucao', (req, res) => {
 
 router.get('/projecao', (req, res) => {
   try {
-    const { familiaId } = req.query
-    res.json(db.projecaoGastosMeses(4, familiaId ? parseInt(familiaId) : null))
+    const { familiaId, usuarioId } = req.query
+    res.json(db.projecaoGastosMeses(4, familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
