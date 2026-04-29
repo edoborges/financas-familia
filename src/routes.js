@@ -1,8 +1,62 @@
 const express = require('express')
 const router = express.Router()
+const multer = require('multer')
 const db = require('./database')
 const { processarMensagem } = require('./processador')
-const { gerarPlanoEconomia } = require('./ai')
+const { gerarPlanoEconomia, analisarArquivoFinanceiro } = require('./ai')
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 } // 15MB
+})
+
+// ── Parser CSV (Mobills e formatos similares) ──
+function parseCSV(csvText) {
+  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l)
+  if (lines.length < 2) return []
+
+  const sep = lines[0].split(';').length > lines[0].split(',').length ? ';' : ','
+  const limpar = s => s.trim().replace(/^["']|["']$/g, '')
+  const headers = lines[0].split(sep).map(h => limpar(h).toLowerCase())
+
+  const idx = {
+    data:      headers.findIndex(h => h.includes('data') || h.includes('date')),
+    descricao: headers.findIndex(h => h.includes('descri') || h.includes('memo') || h.includes('hist')),
+    categoria: headers.findIndex(h => h.includes('categor')),
+    valor:     headers.findIndex(h => h.includes('valor') || h.includes('amount') || h.includes('quantia')),
+    tipo:      headers.findIndex(h => h === 'tipo' || h.includes('nature') || h.includes('tipo lancamento')),
+    conta:     headers.findIndex(h => h.includes('conta') || h.includes('account')),
+  }
+
+  const registros = []
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(sep).map(limpar)
+    if (parts.length < 2) continue
+
+    const valorRaw = idx.valor >= 0 ? parts[idx.valor] : '0'
+    const valor = Math.abs(parseFloat(valorRaw.replace(/\./g, '').replace(',', '.')) || 0)
+    if (!valor) continue
+
+    const tipoStr = (idx.tipo >= 0 ? parts[idx.tipo] : '').toLowerCase()
+    const ehReceita = tipoStr.includes('receita') || tipoStr.includes('entrada') || tipoStr.includes('crédito') || tipoStr.includes('credito') || valorRaw.replace(/\s/g,'').startsWith('+')
+
+    const dataRaw = idx.data >= 0 ? parts[idx.data] : ''
+    let data = null
+    const dm = dataRaw.match(/(\d{2})\/(\d{2})\/(\d{4})/)
+    if (dm) data = `${dm[3]}-${dm[2]}-${dm[1]}`
+    else if (/\d{4}-\d{2}-\d{2}/.test(dataRaw)) data = dataRaw.slice(0,10)
+
+    registros.push({
+      data,
+      descricao: idx.descricao >= 0 ? parts[idx.descricao] : 'Importado',
+      categoria: idx.categoria >= 0 ? parts[idx.categoria] : 'Outros',
+      valor,
+      tipo: ehReceita ? 'receita' : 'despesa',
+      conta: idx.conta >= 0 ? parts[idx.conta] : '',
+    })
+  }
+  return registros
+}
 
 router.get('/status', (req, res) => {
   const usuarios = db.listarUsuarios()
@@ -261,6 +315,125 @@ router.get('/projecao', (req, res) => {
     res.status(500).json({ erro: e.message })
   }
 })
+
+// ── Análise de imagem / PDF com IA ──
+router.post('/analisar-arquivo', upload.single('arquivo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
+    const { mimetype, buffer } = req.file
+    const tipos = ['image/jpeg','image/png','image/webp','image/gif','application/pdf']
+    if (!tipos.includes(mimetype)) return res.status(400).json({ erro: 'Formato não suportado. Use JPG, PNG, WebP ou PDF.' })
+    const base64 = buffer.toString('base64')
+    const resultado = await analisarArquivoFinanceiro(base64, mimetype)
+    res.json(resultado)
+  } catch (e) {
+    console.error('POST /analisar-arquivo erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+// ── Aplicar resultado da análise no banco ──
+router.post('/aplicar-analise', (req, res) => {
+  try {
+    const { usuarioId, analise, cartaoId, contaId } = req.body
+    if (!usuarioId || !analise) return res.status(400).json({ erro: 'Dados incompletos' })
+
+    const resultado = { aplicados: 0, tipo: analise.tipo }
+
+    if (analise.tipo === 'extrato') {
+      // Atualiza saldo da conta se informada
+      if (contaId && analise.saldo != null) {
+        db.atualizarSaldoConta(contaId, analise.saldo)
+        resultado.saldoAtualizado = analise.saldo
+      }
+      // Importa transações como gastos/receitas
+      for (const tx of (analise.transacoes || [])) {
+        if (!tx.valor) continue
+        if (tx.tipo_tx === 'credito') {
+          db.registrarReceita(usuarioId, tx.valor, tx.descricao, tx.data)
+        } else {
+          db.registrarGasto(usuarioId, tx.descricao, tx.valor, 'Outros', 'pix', null, 1, contaId || null)
+        }
+        resultado.aplicados++
+      }
+    }
+
+    if (analise.tipo === 'fatura_cartao') {
+      // Atualiza gasto_atual do cartão com total da fatura
+      if (cartaoId && analise.valor_total) {
+        db.atualizarFaturaCartao(cartaoId, analise.valor_total)
+        resultado.faturaAtualizada = analise.valor_total
+      }
+      // Importa itens como gastos parcelados
+      for (const item of (analise.itens || [])) {
+        if (!item.valor) continue
+        const parcelas = item.total_parcelas || 1
+        db.registrarGasto(usuarioId, item.descricao, item.valor * parcelas, item.categoria || 'Outros', 'crédito', cartaoId || null, parcelas, null)
+        resultado.aplicados++
+      }
+    }
+
+    res.json(resultado)
+  } catch (e) {
+    console.error('POST /aplicar-analise erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+// ── Importar CSV (Mobills e similares) ──
+router.post('/importar-csv', upload.single('arquivo'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ erro: 'Nenhum arquivo enviado' })
+    const texto = req.file.buffer.toString('utf-8')
+    const registros = parseCSV(texto)
+    if (!registros.length) return res.status(400).json({ erro: 'Nenhum lançamento encontrado no CSV. Verifique o formato.' })
+    const receitas = registros.filter(r => r.tipo === 'receita')
+    const despesas = registros.filter(r => r.tipo === 'despesa')
+    res.json({ total: registros.length, receitas: receitas.length, despesas: despesas.length, preview: registros.slice(0, 5), registros })
+  } catch (e) {
+    console.error('POST /importar-csv erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+// ── Confirmar importação CSV ──
+router.post('/importar-csv/confirmar', (req, res) => {
+  try {
+    const { usuarioId, registros } = req.body
+    if (!usuarioId || !registros?.length) return res.status(400).json({ erro: 'Dados incompletos' })
+
+    let gastos = 0, receitas = 0
+    for (const r of registros) {
+      if (!r.valor) continue
+      if (r.tipo === 'receita') {
+        db.registrarReceita(usuarioId, r.valor, r.descricao, r.data)
+        receitas++
+      } else {
+        const cat = mapearCategoriaCSV(r.categoria)
+        db.registrarGasto(usuarioId, r.descricao, r.valor, cat, 'pix', null, 1, null)
+        gastos++
+      }
+    }
+    res.json({ ok: true, gastos, receitas, total: gastos + receitas })
+  } catch (e) {
+    console.error('POST /importar-csv/confirmar erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+function mapearCategoriaCSV(cat) {
+  if (!cat) return 'Outros'
+  const c = cat.toLowerCase()
+  if (/alimenta|mercado|supermerc|restaur|lanche|comida/.test(c)) return 'Alimentação'
+  if (/saúde|saude|médic|medic|farmá|farma|hospital/.test(c)) return 'Saúde'
+  if (/transport|combustív|gasolina|uber|taxi|onibus/.test(c)) return 'Transporte'
+  if (/educa|escola|curso|livro/.test(c)) return 'Educação'
+  if (/lazer|entretenimento|cinema|viagem|hotel/.test(c)) return 'Lazer'
+  if (/vestuário|vestuario|roupa|calçado/.test(c)) return 'Vestuário'
+  if (/casa|aluguel|condomin|água|luz|internet|gás/.test(c)) return 'Casa'
+  if (/assinatura|netflix|spotify|amazon/.test(c)) return 'Assinatura'
+  return 'Outros'
+}
 
 router.get('/plano', async (req, res) => {
   const resumo = db.resumoFinanceiro()

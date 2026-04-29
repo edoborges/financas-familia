@@ -158,6 +158,69 @@ Seja direto, use números reais e emojis. Máximo 500 palavras.`
   return response.content[0].text
 }
 
+async function analisarArquivoFinanceiro(base64Data, mediaType) {
+  const isPDF = mediaType === 'application/pdf'
+  const contentBlock = isPDF
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } }
+
+  const prompt = `Analise este documento financeiro brasileiro e extraia as informações com precisão.
+Retorne APENAS um JSON válido, sem texto antes ou depois.
+
+Se for um EXTRATO BANCÁRIO, tela de conta ou saldo:
+{
+  "tipo": "extrato",
+  "banco": "nome do banco",
+  "conta_tipo": "corrente|poupanca|investimento",
+  "saldo": 0.00,
+  "transacoes": [
+    { "data": "YYYY-MM-DD", "descricao": "descrição", "valor": 0.00, "tipo_tx": "debito|credito" }
+  ]
+}
+
+Se for uma FATURA DE CARTÃO DE CRÉDITO:
+{
+  "tipo": "fatura_cartao",
+  "banco": "nome do banco ou cartão",
+  "valor_total": 0.00,
+  "vencimento": "YYYY-MM-DD",
+  "fechamento": "YYYY-MM-DD",
+  "itens": [
+    {
+      "descricao": "nome da compra",
+      "valor": 0.00,
+      "parcela_atual": 1,
+      "total_parcelas": 1,
+      "data": "YYYY-MM-DD",
+      "categoria": "Alimentação|Transporte|Saúde|Lazer|Outros"
+    }
+  ]
+}
+
+Regras importantes:
+- Valores sempre positivos (sem sinal negativo)
+- Para parcelas identifique padrões como "3/12", "Parcela 3 de 12", "03/12x"
+- Se não conseguir identificar parcelas, use parcela_atual:1 total_parcelas:1
+- Datas sempre no formato YYYY-MM-DD
+- Se a data não aparecer claramente, use null
+- Extraia TODOS os itens visíveis na fatura`
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: prompt }] }],
+    betas: isPDF ? ['pdfs-2024-09-25'] : undefined
+  })
+
+  try {
+    const texto = response.content[0].text.trim()
+    const jsonStr = texto.replace(/^```json\n?/, '').replace(/\n?```$/, '')
+    return JSON.parse(jsonStr)
+  } catch {
+    return { tipo: 'erro', mensagem: 'Não foi possível extrair dados do arquivo.' }
+  }
+}
+
 async function gerarResumoDiario(dados) {
   const { usuarios, gastosMes, salarioTotal, ultimosGastos } = dados
 
@@ -184,4 +247,4 @@ Resumo em 3-4 linhas com emojis, tom animado e uma dica rápida. Máximo 100 pal
   return response.content[0].text
 }
 
-module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario }
+module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario, analisarArquivoFinanceiro }

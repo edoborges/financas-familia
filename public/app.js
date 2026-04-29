@@ -1079,6 +1079,310 @@ async function salvarGastoManual() {
   }
 }
 
+// ── UPLOAD / ANÁLISE DE ARQUIVO ──
+let uploadTabAtual = 'imagem'
+let arquivoSelecionado = null
+let csvSelecionado = null
+let analiseResultado = null
+let csvRegistros = null
+
+function abrirUpload() {
+  arquivoSelecionado = null
+  csvSelecionado = null
+  document.getElementById('up-preview-nome').style.display = 'none'
+  document.getElementById('up-csv-nome').style.display = 'none'
+  document.getElementById('up-arquivo').value = ''
+  document.getElementById('up-csv').value = ''
+
+  // Popula selects de usuário
+  const usuarios = USUARIOS_CACHE.length ? USUARIOS_CACHE : [usuario]
+  const opts = usuarios.map(u => `<option value="${u.id}"${u.id === usuario.id ? ' selected' : ''}>${u.nome}</option>`).join('')
+  document.getElementById('up-usuario').innerHTML = opts
+  document.getElementById('up-csv-usuario').innerHTML = opts
+
+  selUploadTab(document.querySelector('.utab'), 'imagem')
+  document.getElementById('modal-upload').style.display = 'flex'
+}
+
+function selUploadTab(btn, tab) {
+  uploadTabAtual = tab
+  document.querySelectorAll('.utab').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  document.getElementById('up-painel-imagem').style.display = tab === 'imagem' ? 'block' : 'none'
+  document.getElementById('up-painel-csv').style.display = tab === 'csv' ? 'block' : 'none'
+  const btnEnviar = document.getElementById('up-btn-enviar')
+  btnEnviar.textContent = tab === 'imagem' ? '🔍 Analisar com IA' : '📊 Processar CSV'
+}
+
+function handleArquivoSelect(input) {
+  if (!input.files[0]) return
+  arquivoSelecionado = input.files[0]
+  const el = document.getElementById('up-preview-nome')
+  el.textContent = `📎 ${arquivoSelecionado.name} (${(arquivoSelecionado.size/1024).toFixed(0)} KB)`
+  el.style.display = 'block'
+}
+
+function handleCSVSelect(input) {
+  if (!input.files[0]) return
+  csvSelecionado = input.files[0]
+  const el = document.getElementById('up-csv-nome')
+  el.textContent = `📎 ${csvSelecionado.name}`
+  el.style.display = 'block'
+}
+
+function handleArquivoDrop(event) {
+  const file = event.dataTransfer.files[0]
+  if (!file) return
+  arquivoSelecionado = file
+  const el = document.getElementById('up-preview-nome')
+  el.textContent = `📎 ${file.name} (${(file.size/1024).toFixed(0)} KB)`
+  el.style.display = 'block'
+}
+
+async function enviarUpload() {
+  if (uploadTabAtual === 'imagem') {
+    if (!arquivoSelecionado) { toast('Selecione um arquivo!', 'erro'); return }
+    await processarImagem()
+  } else {
+    if (!csvSelecionado) { toast('Selecione um arquivo CSV!', 'erro'); return }
+    await processarCSV()
+  }
+}
+
+async function processarImagem() {
+  const btn = document.getElementById('up-btn-enviar')
+  btn.disabled = true
+  btn.textContent = '⏳ Analisando...'
+
+  try {
+    const formData = new FormData()
+    formData.append('arquivo', arquivoSelecionado)
+
+    const res = await fetch('/api/analisar-arquivo', { method: 'POST', body: formData })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.erro || 'Erro na análise')
+
+    analiseResultado = data
+    fecharModal('modal-upload')
+    mostrarResultadoAnalise(data)
+  } catch (e) {
+    toast('❌ ' + e.message, 'erro')
+  } finally {
+    btn.disabled = false
+    btn.textContent = '🔍 Analisar com IA'
+  }
+}
+
+async function processarCSV() {
+  const btn = document.getElementById('up-btn-enviar')
+  btn.disabled = true
+  btn.textContent = '⏳ Processando...'
+
+  try {
+    const formData = new FormData()
+    formData.append('arquivo', csvSelecionado)
+
+    const res = await fetch('/api/importar-csv', { method: 'POST', body: formData })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.erro || 'Erro ao processar CSV')
+
+    csvRegistros = data.registros
+    fecharModal('modal-upload')
+    mostrarResultadoCSV(data)
+  } catch (e) {
+    toast('❌ ' + e.message, 'erro')
+  } finally {
+    btn.disabled = false
+    btn.textContent = '📊 Processar CSV'
+  }
+}
+
+function mostrarResultadoAnalise(data) {
+  const modal = document.getElementById('modal-resultado-upload')
+  const titulo = document.getElementById('res-titulo')
+  const conteudo = document.getElementById('res-conteudo')
+  const btns = document.getElementById('res-btns')
+  const usuarioId = parseInt(document.getElementById('up-usuario').value)
+
+  if (data.tipo === 'erro') {
+    titulo.textContent = '❌ Não foi possível analisar'
+    conteudo.innerHTML = `<p class="res-desc">${data.mensagem || 'Tente com uma imagem mais nítida.'}</p>`
+    btns.innerHTML = `<button class="btn-confirm" onclick="fecharModal('modal-resultado-upload')">Fechar</button>`
+    modal.style.display = 'flex'
+    return
+  }
+
+  if (data.tipo === 'extrato') {
+    titulo.textContent = '🏦 Extrato Bancário Detectado'
+    const contas = USUARIOS_CACHE.length
+      ? [] // será preenchido abaixo
+      : []
+
+    conteudo.innerHTML = `
+      <div class="res-info-card">
+        <div class="res-info-row"><span>Banco</span><strong>${data.banco || '—'}</strong></div>
+        <div class="res-info-row"><span>Tipo</span><strong>${data.conta_tipo || 'corrente'}</strong></div>
+        <div class="res-info-row res-destaque"><span>Saldo detectado</span><strong class="verde">${fmt(data.saldo || 0)}</strong></div>
+      </div>
+      ${data.transacoes?.length ? `
+        <div class="res-secao-titulo">📋 ${data.transacoes.length} transação(ões) detectada(s)</div>
+        <div class="res-lista">
+          ${data.transacoes.slice(0,5).map(t => `
+            <div class="res-tx-item ${t.tipo_tx}">
+              <span class="res-tx-desc">${t.descricao}</span>
+              <span class="res-tx-val">${t.tipo_tx === 'debito' ? '-' : '+'}${fmt(t.valor)}</span>
+            </div>`).join('')}
+          ${data.transacoes.length > 5 ? `<div class="res-mais">+ ${data.transacoes.length - 5} mais...</div>` : ''}
+        </div>` : ''}
+      <label class="input-label" style="margin-top:12px">Qual conta atualizar?</label>
+      <select id="res-conta-id" class="select-input"><option value="">— Criar nova conta —</option></select>
+    `
+    // Carrega contas no select
+    api('/contas').then(contas => {
+      const sel = document.getElementById('res-conta-id')
+      if (!sel) return
+      contas.forEach(c => {
+        const opt = document.createElement('option')
+        opt.value = c.id
+        opt.textContent = `${c.nome} (${fmt(c.saldo)})`
+        if ((c.banco || c.nome).toLowerCase().includes((data.banco || '').toLowerCase())) opt.selected = true
+        sel.appendChild(opt)
+      })
+    }).catch(() => {})
+
+    btns.innerHTML = `
+      <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
+      <button class="btn-confirm btn-verde" onclick="aplicarAnalise('extrato',${usuarioId})">✅ Aplicar</button>
+    `
+  }
+
+  if (data.tipo === 'fatura_cartao') {
+    titulo.textContent = '💳 Fatura de Cartão Detectada'
+    const itensParcelas = (data.itens || []).filter(i => i.total_parcelas > 1)
+    const itensNormais = (data.itens || []).filter(i => i.total_parcelas <= 1)
+
+    conteudo.innerHTML = `
+      <div class="res-info-card">
+        <div class="res-info-row"><span>Cartão / Banco</span><strong>${data.banco || '—'}</strong></div>
+        <div class="res-info-row"><span>Vencimento</span><strong>${data.vencimento ? new Date(data.vencimento+'T00:00:00').toLocaleDateString('pt-BR') : '—'}</strong></div>
+        <div class="res-info-row res-destaque"><span>Total da fatura</span><strong class="vermelho">${fmt(data.valor_total || 0)}</strong></div>
+      </div>
+      ${itensParcelas.length ? `
+        <div class="res-secao-titulo">🔄 ${itensParcelas.length} compra(s) parcelada(s)</div>
+        <div class="res-lista">
+          ${itensParcelas.map(i => `
+            <div class="res-tx-item debito">
+              <span class="res-tx-desc">${i.descricao} <em>(${i.parcela_atual}/${i.total_parcelas})</em></span>
+              <span class="res-tx-val">${fmt(i.valor)}/mês</span>
+            </div>`).join('')}
+        </div>` : ''}
+      ${itensNormais.length ? `
+        <div class="res-secao-titulo">📋 ${itensNormais.length} compra(s) avulsa(s)</div>
+        <div class="res-lista">
+          ${itensNormais.slice(0,4).map(i => `
+            <div class="res-tx-item debito">
+              <span class="res-tx-desc">${i.descricao}</span>
+              <span class="res-tx-val">${fmt(i.valor)}</span>
+            </div>`).join('')}
+          ${itensNormais.length > 4 ? `<div class="res-mais">+ ${itensNormais.length - 4} mais...</div>` : ''}
+        </div>` : ''}
+      <label class="input-label" style="margin-top:12px">Qual cartão atualizar?</label>
+      <select id="res-cartao-id" class="select-input"><option value="">— Não atualizar cartão —</option></select>
+    `
+    // Carrega cartões no select
+    api('/cartoes').then(cartoes => {
+      const sel = document.getElementById('res-cartao-id')
+      if (!sel) return
+      cartoes.forEach(c => {
+        const opt = document.createElement('option')
+        opt.value = c.id
+        opt.textContent = `${c.nome} (fatura atual: ${fmt(c.gasto_atual)})`
+        if (c.nome.toLowerCase().includes((data.banco || '').toLowerCase())) opt.selected = true
+        sel.appendChild(opt)
+      })
+    }).catch(() => {})
+
+    btns.innerHTML = `
+      <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
+      <button class="btn-confirm btn-verde" onclick="aplicarAnalise('fatura_cartao',${usuarioId})">✅ Aplicar tudo</button>
+    `
+  }
+
+  modal.style.display = 'flex'
+}
+
+async function aplicarAnalise(tipo, usuarioId) {
+  try {
+    const cartaoId = document.getElementById('res-cartao-id')?.value || null
+    const contaId = document.getElementById('res-conta-id')?.value || null
+
+    const res = await api('/aplicar-analise', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId, analise: analiseResultado, cartaoId: cartaoId || null, contaId: contaId || null })
+    })
+
+    fecharModal('modal-resultado-upload')
+    const msg = tipo === 'fatura_cartao'
+      ? `💳 Fatura atualizada! ${res.aplicados} compra(s) importada(s).`
+      : `🏦 Conta atualizada! ${res.aplicados} transação(ões) importada(s).`
+    toast(msg)
+    carregarInicio()
+    if (tipo === 'fatura_cartao') carregarCartoes()
+    else if (document.getElementById('aba-contas').style.display !== 'none') carregarContas()
+  } catch (e) {
+    toast('❌ Erro ao aplicar: ' + e.message, 'erro')
+  }
+}
+
+function mostrarResultadoCSV(data) {
+  const modal = document.getElementById('modal-resultado-upload')
+  const titulo = document.getElementById('res-titulo')
+  const conteudo = document.getElementById('res-conteudo')
+  const btns = document.getElementById('res-btns')
+  const usuarioId = parseInt(document.getElementById('up-csv-usuario').value)
+
+  titulo.textContent = '📄 CSV Pronto para Importar'
+
+  conteudo.innerHTML = `
+    <div class="res-info-card">
+      <div class="res-info-row"><span>Total de lançamentos</span><strong>${data.total}</strong></div>
+      <div class="res-info-row"><span class="verde">Receitas</span><strong class="verde">${data.receitas}</strong></div>
+      <div class="res-info-row"><span class="vermelho">Despesas</span><strong class="vermelho">${data.despesas}</strong></div>
+    </div>
+    <div class="res-secao-titulo">👀 Prévia (5 primeiros)</div>
+    <div class="res-lista">
+      ${(data.preview || []).map(r => `
+        <div class="res-tx-item ${r.tipo === 'receita' ? 'credito' : 'debito'}">
+          <span class="res-tx-desc">${r.descricao}</span>
+          <span class="res-tx-val">${r.tipo === 'receita' ? '+' : '-'}${fmt(r.valor)}</span>
+        </div>`).join('')}
+    </div>
+  `
+
+  btns.innerHTML = `
+    <button class="btn-cancel" onclick="fecharModal('modal-resultado-upload')">Cancelar</button>
+    <button class="btn-confirm btn-verde" onclick="confirmarImportacaoCSV(${usuarioId})">✅ Importar ${data.total} lançamentos</button>
+  `
+  modal.style.display = 'flex'
+}
+
+async function confirmarImportacaoCSV(usuarioId) {
+  if (!csvRegistros?.length) return
+  try {
+    const res = await api('/importar-csv/confirmar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId, registros: csvRegistros })
+    })
+    fecharModal('modal-resultado-upload')
+    toast(`✅ ${res.total} lançamentos importados! (${res.gastos} gastos · ${res.receitas} receitas)`)
+    carregarInicio()
+  } catch (e) {
+    toast('❌ Erro ao importar: ' + e.message, 'erro')
+  }
+}
+
 // ── RECEITAS ──
 async function abrirModalReceita() {
   const hoje = new Date().toISOString().split('T')[0]

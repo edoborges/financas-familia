@@ -423,6 +423,43 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   box-shadow:0 2px 8px rgba(0,0,0,.05);border-top:3px solid var(--verde);
 }
 
+/* ── MODAL UPLOAD ── */
+.upload-tabs{display:flex;gap:8px;margin-bottom:16px}
+.utab{flex:1;padding:10px;border:2px solid var(--borda);border-radius:12px;background:#f8fafc;font-size:.82rem;font-weight:600;cursor:pointer;color:var(--sub);transition:all .15s}
+.utab.sel{border-color:var(--azul);background:#eff6ff;color:var(--azul)}
+
+.upload-dropzone{
+  border:2px dashed var(--borda);border-radius:16px;padding:28px 20px;
+  text-align:center;cursor:pointer;transition:all .2s;background:#f8fafc;
+}
+.upload-dropzone:hover,.upload-dropzone.drag{border-color:var(--azul);background:#eff6ff}
+.up-icon{font-size:2.4rem;margin-bottom:8px}
+.up-texto{font-size:.9rem;font-weight:600;color:#334155;margin-bottom:4px}
+.up-sub{font-size:.75rem;color:var(--sub)}
+.up-preview-nome{margin-top:10px;font-size:.82rem;font-weight:600;color:var(--verde);background:#f0fdf4;padding:6px 12px;border-radius:8px}
+
+/* ── MODAL RESULTADO ANÁLISE ── */
+.res-conteudo{max-height:60vh;overflow-y:auto}
+.res-info-card{background:#f8fafc;border-radius:14px;padding:14px 16px;margin-bottom:14px}
+.res-info-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:.88rem;border-bottom:1px solid var(--borda)}
+.res-info-row:last-child{border-bottom:none}
+.res-info-row.res-destaque{margin-top:4px}
+.res-info-row span{color:var(--sub)}
+.res-secao-titulo{font-size:.78rem;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px}
+.res-lista{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.res-tx-item{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-radius:10px;font-size:.84rem}
+.res-tx-item.debito{background:#fef2f2}
+.res-tx-item.credito{background:#f0fdf4}
+.res-tx-desc{flex:1;margin-right:10px;color:#334155}
+.res-tx-desc em{color:var(--sub);font-size:.78rem}
+.res-tx-val{font-weight:700;white-space:nowrap}
+.res-tx-item.debito .res-tx-val{color:var(--vermelho)}
+.res-tx-item.credito .res-tx-val{color:var(--verde)}
+.res-mais{font-size:.78rem;color:var(--sub);text-align:center;padding:4px}
+.res-desc{color:var(--sub);font-size:.9rem;margin:12px 0}
+.verde{color:var(--verde)!important}
+.vermelho{color:var(--vermelho)!important}
+
 /* ── MODAL RECEITA ── */
 .modal-desc{font-size:.83rem;color:var(--sub);margin-bottom:14px;line-height:1.5}
 .receita-tipos{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
