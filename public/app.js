@@ -4,7 +4,7 @@
 let usuario = null
 let graficoInstance = null
 let metaEmojiSel = '🎯'
-let receitaTipoSel = 'Freelance'
+let receitaTipoSel = 'Atendimento'
 let adminVisualizandoFamiliaId = null  // quando super_admin está vendo uma família
 let visaoAtual = localStorage.getItem('fin_visao') || 'pessoal' // 'pessoal' | 'consolidado'
 
