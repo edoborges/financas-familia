@@ -219,8 +219,8 @@ router.get('/gastos/evolucao', (req, res) => {
 })
 
 router.get('/cartoes', (req, res) => {
-  const { familiaId } = req.query
-  res.json(db.listarCartoes(familiaId ? parseInt(familiaId) : null))
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarCartoes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.post('/cartoes', (req, res) => {
@@ -247,8 +247,8 @@ router.delete('/cartoes/:id', (req, res) => {
 })
 
 router.get('/contas', (req, res) => {
-  const { familiaId } = req.query
-  res.json(db.listarContas(familiaId ? parseInt(familiaId) : null))
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarContas(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.post('/contas', (req, res) => {
@@ -299,8 +299,8 @@ router.put('/metas/:id', (req, res) => {
 
 // Empréstimos
 router.get('/emprestimos', (req, res) => {
-  const { familiaId } = req.query
-  res.json(db.listarEmprestimos(familiaId ? parseInt(familiaId) : null))
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarEmprestimos(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.post('/emprestimos', (req, res) => {
@@ -366,8 +366,8 @@ router.delete('/receitas-programadas/:id', (req, res) => {
 
 // Receitas
 router.get('/receitas', (req, res) => {
-  const { familiaId } = req.query
-  res.json(db.listarReceitas(familiaId ? parseInt(familiaId) : null))
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarReceitas(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
 })
 
 router.post('/receitas', (req, res) => {

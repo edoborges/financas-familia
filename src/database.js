@@ -331,7 +331,8 @@ function registrarReceita(usuarioId, valor, descricao = 'Salário', dataReceita 
   const data = dataReceita || new Date().toISOString().split('T')[0]
   return db.prepare('INSERT INTO receitas (usuario_id, valor, descricao, data_receita) VALUES (?, ?, ?, ?)').run(usuarioId, valor, descricao, data)
 }
-function listarReceitas(familiaId = null) {
+function listarReceitas(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE r.usuario_id = ? ORDER BY r.data_receita DESC').all(usuarioId)
   if (familiaId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? ORDER BY r.data_receita DESC').all(familiaId)
   return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id ORDER BY r.data_receita DESC').all()
 }
@@ -446,7 +447,8 @@ function criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcela
   return db.prepare(`INSERT INTO emprestimos (usuario_id, tipo, descricao, credor, valor_total, parcela_mensal, total_parcelas, taxa_juros, data_vencimento)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal || 0, totalParcelas || 1, taxaJuros || 0, dataVencimento || null)
 }
-function listarEmprestimos(familiaId = null) {
+function listarEmprestimos(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.usuario_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(usuarioId)
   if (familiaId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(familiaId)
   return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = 'ativo' ORDER BY e.criado_em DESC").all()
 }
