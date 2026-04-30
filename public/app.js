@@ -1849,6 +1849,26 @@ function abrirMenuFerramentas() {
   document.getElementById('modal-ferramentas').style.display = 'flex'
 }
 
+// ── LIMPAR IMPORTADOS ──
+async function limparImportados() {
+  fecharModal('modal-ferramentas')
+  const fam = famId()
+  const uid = usuario?.id
+  if (!confirm('⚠️ Isso vai remover TODOS os lançamentos importados via CSV ou extrato.\n\nOs lançamentos manuais não serão afetados.\n\nDeseja continuar?')) return
+  try {
+    const body = uid ? { usuarioId: uid } : { familiaId: fam }
+    const res = await api('/gastos/importados', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    toast(`🧹 ${res.removidos} lançamento(s) removido(s)`)
+    carregarInicio()
+  } catch (e) {
+    toast('❌ ' + e.message, 'erro')
+  }
+}
+
 // ── EXPORTAÇÃO ──
 function exportarCSV() {
   const now = new Date()

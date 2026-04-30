@@ -387,6 +387,34 @@ router.delete('/receitas/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Limpar gastos importados (origem='importado') de um usuário ou família
+router.delete('/gastos/importados', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.body
+    let result
+    if (usuarioId) {
+      result = db.limparGastosImportados(null, parseInt(usuarioId))
+    } else if (familiaId) {
+      result = db.limparGastosImportados(parseInt(familiaId), null)
+    } else {
+      return res.status(400).json({ erro: 'Informe familiaId ou usuarioId' })
+    }
+    res.json({ ok: true, removidos: result.changes })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+// Deletar gasto individual
+router.delete('/gastos/:id', (req, res) => {
+  try {
+    const result = db.deletarGasto(parseInt(req.params.id))
+    res.json({ ok: true, changes: result.changes })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.get('/receitas/evolucao', (req, res) => {
   const { familiaId } = req.query
   res.json(db.receitasPorMes(6, familiaId ? parseInt(familiaId) : null))

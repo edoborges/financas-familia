@@ -512,6 +512,22 @@ function listarImportacoes(familiaId = null) {
   return db.prepare('SELECT * FROM importacoes ORDER BY criado_em DESC LIMIT 30').all()
 }
 
+function deletarGasto(id) {
+  const g = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id)
+  if (g?.cartao_id) db.prepare('UPDATE cartoes SET gasto_atual = MAX(0, gasto_atual - ?) WHERE id = ?').run(g.valor, g.cartao_id)
+  return db.prepare('DELETE FROM gastos WHERE id = ?').run(id)
+}
+
+function limparGastosImportados(familiaId = null, usuarioId = null) {
+  if (usuarioId) {
+    return db.prepare("DELETE FROM gastos WHERE usuario_id = ? AND origem = 'importado'").run(usuarioId)
+  }
+  if (familiaId) {
+    return db.prepare("DELETE FROM gastos WHERE usuario_id IN (SELECT id FROM usuarios WHERE familia_id = ?) AND origem = 'importado'").run(familiaId)
+  }
+  return { changes: 0 }
+}
+
 // ===== DUPLICATAS =====
 function verificarDuplicataGasto(usuarioId, descricao, valor, data) {
   if (data) {
@@ -560,7 +576,7 @@ module.exports = {
   criarConta, listarContas, atualizarSaldoConta, atualizarConta, deletarConta,
   criarCartao, listarCartoes, obterCartaoPorNome, atualizarGastoCartao, atualizarFaturaCartao, deletarCartao,
   criarEmprestimo, listarEmprestimos, atualizarEmprestimo, editarEmprestimo, deletarEmprestimo, totalDividas,
-  registrarGasto, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
+  registrarGasto, deletarGasto, limparGastosImportados, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,
   registrarReceita, listarReceitas, totalReceitasMes, deletarReceita, receitasPorMes,
   listarReceitasProgramadas, adicionarReceitaProgramada, atualizarReceitaProgramada, removerReceitaProgramada, calcularRendaMes,
