@@ -5,9 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>FinançasFamília</title>
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#07091a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -48,9 +51,9 @@
   <div class="login-bg">
     <div class="login-content">
       <div class="login-logo">
-        <div class="app-icon">💰</div>
+        <img src="/logo.svg" alt="FinançasFamília" class="logo-img">
         <h1>FinançasFamília</h1>
-        <p>Selecione seu perfil</p>
+        <p>Selecione seu perfil para entrar</p>
       </div>
       <div id="login-cards" class="login-cards"></div>
     </div>
@@ -93,11 +96,14 @@
 
   <!-- HEADER -->
   <header class="app-header">
-    <div class="header-left" onclick="abrirPerfil()" style="cursor:pointer" title="Editar perfil">
-      <div id="h-avatar" class="h-avatar">👤</div>
-      <div class="h-info">
-        <div id="h-saudacao" class="h-saudacao">Olá!</div>
-        <div id="h-nome" class="h-nome">Carregando... ✏️</div>
+    <div class="header-left">
+      <img src="/logo.svg" alt="" class="h-logo" onclick="mostrarAba('inicio');navBtn('nav-inicio')">
+      <div onclick="abrirPerfil()" style="cursor:pointer;display:flex;align-items:center;gap:10px" title="Editar perfil">
+        <div id="h-avatar" class="h-avatar">👤</div>
+        <div class="h-info">
+          <div id="h-saudacao" class="h-saudacao">Olá!</div>
+          <div id="h-nome" class="h-nome">Carregando... ✏️</div>
+        </div>
       </div>
     </div>
     <div class="header-right">

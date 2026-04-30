@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <!-- Background gradient: deep premium midnight -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0818"/>
+      <stop offset="55%" stop-color="#140f3a"/>
+      <stop offset="100%" stop-color="#0b1e55"/>
+    </linearGradient>
+
+    <!-- Gold gradient for bars -->
+    <linearGradient id="gold" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#b45309"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+
+    <!-- House stroke gradient -->
+    <linearGradient id="houseGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c7d2fe"/>
+    </linearGradient>
+
+    <!-- Glow filter for house -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gold glow for bars -->
+    <filter id="goldGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Clip bars inside house walls -->
+    <clipPath id="houseClip">
+      <rect x="44" y="91" width="112" height="88" rx="5"/>
+    </clipPath>
+
+    <!-- Radial glow center -->
+    <radialGradient id="centerGlow" cx="50%" cy="52%" r="45%">
+      <stop offset="0%" stop-color="#4338ca" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#4338ca" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Top-right aurora -->
+    <radialGradient id="auroraTop" cx="75%" cy="25%" r="40%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Bottom-left aurora -->
+    <radialGradient id="auroraBot" cx="25%" cy="78%" r="35%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ── BACKGROUND ── -->
+  <rect width="200" height="200" rx="44" fill="url(#bg)"/>
+  <rect width="200" height="200" rx="44" fill="url(#centerGlow)"/>
+  <rect width="200" height="200" rx="44" fill="url(#auroraTop)"/>
+  <rect width="200" height="200" rx="44" fill="url(#auroraBot)"/>
+
+  <!-- Subtle top glare -->
+  <rect x="0" y="0" width="200" height="70" rx="44" fill="url(#auroraTop)" opacity="0.5"/>
+
+  <!-- ── HOUSE ROOF ── -->
+  <polygon
+    points="100,36 28,93 172,93"
+    fill="rgba(255,255,255,0.05)"
+    stroke="url(#houseGrad)"
+    stroke-width="7"
+    stroke-linejoin="round"
+    filter="url(#glow)"/>
+
+  <!-- ── HOUSE WALLS ── -->
+  <rect
+    x="44" y="91" width="112" height="88" rx="5"
+    fill="rgba(255,255,255,0.04)"
+    stroke="url(#houseGrad)"
+    stroke-width="7"
+    filter="url(#glow)"/>
+
+  <!-- ── BAR CHARTS (inside house) ── -->
+  <g clip-path="url(#houseClip)" filter="url(#goldGlow)">
+    <!-- Bar 1 – short -->
+    <rect x="54"  y="143" width="24" height="36" rx="4" fill="url(#gold)"/>
+    <!-- Bar 2 – medium -->
+    <rect x="88"  y="123" width="24" height="56" rx="4" fill="url(#gold)"/>
+    <!-- Bar 3 – tall -->
+    <rect x="122" y="106" width="24" height="73" rx="4" fill="url(#gold)"/>
+  </g>
+
+  <!-- ── TREND LINE ── -->
+  <polyline
+    points="66,143 100,123 134,106"
+    fill="none"
+    stroke="#fcd34d"
+    stroke-width="3.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.75"
+    clip-path="url(#houseClip)"/>
+
+  <!-- Trend dots -->
+  <circle cx="66"  cy="143" r="4.5" fill="#fcd34d" clip-path="url(#houseClip)"/>
+  <circle cx="100" cy="123" r="4.5" fill="#fcd34d" clip-path="url(#houseClip)"/>
+  <circle cx="134" cy="106" r="4.5" fill="#fcd34d" clip-path="url(#houseClip)"/>
+
+  <!-- ── THIN BORDER RING (premium polish) ── -->
+  <rect
+    x="1.5" y="1.5" width="197" height="197" rx="43"
+    fill="none"
+    stroke="rgba(255,255,255,0.08)"
+    stroke-width="1.5"/>
+</svg>
