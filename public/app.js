@@ -376,6 +376,9 @@ async function carregarInicio() {
     const score = calcularScore(resumo, orcs, cats)
     renderScoreCard(score)
 
+    // Patrimônio líquido
+    renderPatrimonio(resumo)
+
     // Orçamentos
     renderOrcamentosSecao()
 
@@ -513,8 +516,16 @@ async function abrirRelatorio() {
   document.getElementById('relatorio-conteudo').innerHTML =
     '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
 
-  const [gastosEv, receitasEv, cats] = await Promise.all([
-    api('/gastos/evolucao' + famQ()), api('/receitas/evolucao' + famQ()), api('/gastos/categorias' + famQ())
+  // Mês anterior para o comparativo
+  const now = new Date()
+  const mesPrev = now.getMonth() === 0 ? 12 : now.getMonth()
+  const anoPrev = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+
+  const [gastosEv, receitasEv, cats, catsPrev] = await Promise.all([
+    api('/gastos/evolucao' + famQ()),
+    api('/receitas/evolucao' + famQ()),
+    api('/gastos/categorias' + famQ()),
+    api(`/gastos/categorias?mes=${mesPrev}&ano=${anoPrev}${famQAnd()}`)
   ])
 
   const nomeMes = mesStr => {
@@ -536,6 +547,8 @@ async function abrirRelatorio() {
     return { mes: m, gastos: g, receitas: r, saldo: r - g }
   })
 
+  const nomeMesPrev = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'][mesPrev - 1]
+
   document.getElementById('relatorio-conteudo').innerHTML = `
     <div class="rel-secao">
       <div class="rel-titulo">Receitas vs Gastos — últimos 6 meses</div>
@@ -549,6 +562,10 @@ async function abrirRelatorio() {
       <div class="rel-titulo">Por categoria — mês atual</div>
       ${cats.length ? `<canvas id="chart-cats" style="max-height:180px;margin-bottom:12px"></canvas>
       <div id="rel-cat-lista" class="cat-lista"></div>` : '<p style="color:#94a3b8;font-size:.88rem">Nenhum gasto lançado este mês.</p>'}
+    </div>
+    <div class="rel-secao" id="rel-comparativo-secao">
+      <div class="rel-titulo">📊 Comparativo vs ${nomeMesPrev}</div>
+      <div id="rel-comparativo" class="rel-comparativo"></div>
     </div>
   `
 
@@ -602,6 +619,45 @@ async function abrirRelatorio() {
         <span class="cat-pct">${total>0?((c.total/total)*100).toFixed(0):0}%</span>
       </div>`).join('')
   }
+
+  // Comparativo mês anterior
+  renderComparativo(cats, catsPrev, nomeMesPrev)
+}
+
+function renderComparativo(cats, catsPrev, nomePrev) {
+  const el = document.getElementById('rel-comparativo')
+  if (!el) return
+  if (!cats.length && !catsPrev.length) {
+    el.innerHTML = '<p style="color:#94a3b8;font-size:.88rem">Sem dados para comparar.</p>'
+    return
+  }
+
+  const prevMap = Object.fromEntries((catsPrev || []).map(c => [c.categoria, c.total]))
+  const allCats = [...new Set([...cats.map(c => c.categoria), ...Object.keys(prevMap)])]
+
+  el.innerHTML = allCats.map(cat => {
+    const atual = (cats.find(c => c.categoria === cat)?.total) || 0
+    const prev = prevMap[cat] || 0
+    const diff = atual - prev
+    const pctChange = prev > 0 ? ((diff / prev) * 100) : (atual > 0 ? 100 : 0)
+    const subiu = diff > 0
+    const estavel = Math.abs(pctChange) < 5
+    const cor = estavel ? '#64748b' : subiu ? '#e11d48' : '#10b981'
+    const seta = estavel ? '→' : subiu ? '↑' : '↓'
+    const emoji = EMOJI_CAT[cat] || '📦'
+
+    return `<div class="comp-item">
+      <div class="comp-cat">${emoji} ${cat}</div>
+      <div class="comp-valores">
+        <span class="comp-prev">${fmt(prev)}</span>
+        <span class="comp-seta" style="color:${cor}">${seta}</span>
+        <span class="comp-atual">${fmt(atual)}</span>
+      </div>
+      <div class="comp-diff" style="color:${cor}">
+        ${estavel ? '≈ sem mudança' : `${subiu ? '+' : ''}${fmt(diff)} (${subiu ? '+' : ''}${pctChange.toFixed(0)}%)`}
+      </div>
+    </div>`
+  }).join('')
 }
 
 function renderCartoesScroll(cartoes) {
@@ -2063,6 +2119,36 @@ async function criarNovaFamilia() {
   } catch (e) {
     toast('❌ Erro ao criar família: ' + e.message, 'erro')
   }
+}
+
+// ══════════════════════════════════════════
+//  PATRIMÔNIO LÍQUIDO
+// ══════════════════════════════════════════
+function renderPatrimonio(resumo) {
+  const el = document.getElementById('patrimonio-card')
+  if (!el) return
+  const ativos = resumo.saldoContas || 0
+  const passivos = resumo.totalEmDividas || 0
+  const patrimonio = ativos - passivos
+  const positivo = patrimonio >= 0
+  const cor = positivo ? '#10b981' : '#e11d48'
+  const icone = positivo ? '📈' : '📉'
+
+  el.innerHTML = `
+    <div class="pat-titulo">${icone} Patrimônio Líquido</div>
+    <div class="pat-valor" style="color:${cor}">${positivo ? '+' : ''}${fmt(patrimonio)}</div>
+    <div class="pat-pills">
+      <div class="pat-pill">
+        <div class="pat-pill-label">✅ Ativos (contas)</div>
+        <div class="pat-pill-valor" style="color:#10b981">${fmt(ativos)}</div>
+      </div>
+      <div class="pat-sep">−</div>
+      <div class="pat-pill">
+        <div class="pat-pill-label">💸 Passivos (dívidas)</div>
+        <div class="pat-pill-valor" style="color:#e11d48">${fmt(passivos)}</div>
+      </div>
+    </div>
+  `
 }
 
 // ══════════════════════════════════════════
