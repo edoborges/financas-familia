@@ -635,4 +635,55 @@ router.get('/plano', async (req, res) => {
   res.json({ plano })
 })
 
+// ── ORÇAMENTOS POR CATEGORIA ──
+router.get('/orcamentos', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.query
+    res.json(db.listarOrcamentos(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/orcamentos', (req, res) => {
+  try {
+    const { usuarioId, familiaId, categoria, valorLimite } = req.body
+    res.json(db.salvarOrcamento(parseInt(usuarioId), familiaId ? parseInt(familiaId) : 1, categoria, parseFloat(valorLimite)))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/orcamentos/:id', (req, res) => {
+  try {
+    res.json(db.deletarOrcamento(parseInt(req.params.id)))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+// ── GASTOS RECORRENTES ──
+router.get('/recorrentes', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.query
+    res.json(db.listarRecorrentes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/recorrentes', (req, res) => {
+  try {
+    const { usuarioId, descricao, valor, categoria, formaPagamento, diaMes } = req.body
+    res.json(db.salvarRecorrente(parseInt(usuarioId), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.put('/recorrentes/:id', (req, res) => {
+  try {
+    const { descricao, valor, categoria, formaPagamento, diaMes, ativa } = req.body
+    res.json(db.atualizarRecorrente(parseInt(req.params.id), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1, ativa ?? 1))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/recorrentes/:id', (req, res) => {
+  try {
+    res.json(db.deletarRecorrente(parseInt(req.params.id)))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/recorrentes/processar', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.body
+    const criados = db.processarRecorrentes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null)
+    res.json({ criados })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 module.exports = router

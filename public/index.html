@@ -210,6 +210,13 @@
       </div>
       <div id="inicio-emprestimos" class="emprestimos-row"></div>
 
+      <!-- Orçamentos por categoria -->
+      <div class="section-title-row">
+        <span>💰 Orçamentos do Mês</span>
+        <button class="ver-tudo" onclick="abrirModalOrcamentos()">Gerenciar</button>
+      </div>
+      <div id="orcamentos-section" class="orcamentos-section"></div>
+
       <!-- Evolução mensal mini -->
       <div class="section-title-row">
         <span>📊 Evolução de Gastos</span>
@@ -599,6 +606,26 @@
       </button>
     </div>
 
+    <div class="ferr-secao">
+      <div class="ferr-titulo">📌 Despesas Fixas & Orçamentos</div>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirModalRecorrentes()">
+        <span class="ferr-icon">🔁</span>
+        <div>
+          <div class="ferr-nome">Gastos Recorrentes</div>
+          <div class="ferr-sub">Netflix, academia, streaming... lançados automaticamente todo mês</div>
+        </div>
+        <span>→</span>
+      </button>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirModalOrcamentos()">
+        <span class="ferr-icon">🎯</span>
+        <div>
+          <div class="ferr-nome">Orçamentos por Categoria</div>
+          <div class="ferr-sub">Defina limites de gasto por categoria e receba alertas</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
     <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="fecharModal('modal-ferramentas')">Fechar</button>
   </div>
 </div>
@@ -782,6 +809,83 @@
       <button class="btn-cancel" onclick="fecharModal('modal-gasto')">Cancelar</button>
       <button class="btn-confirm" onclick="salvarGastoManual()">💸 Lançar Gasto</button>
     </div>
+  </div>
+</div>
+
+<!-- ══ MODAL ORÇAMENTOS ══ -->
+<div id="modal-orcamentos" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-orcamentos')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🎯 Orçamentos por Categoria</h3>
+    <p class="modal-desc">Defina o limite mensal por categoria. O app alerta quando você estiver próximo do limite.</p>
+    <div id="orcamentos-lista" class="orcamentos-lista"></div>
+    <hr style="margin:12px 0;opacity:.12">
+    <h4 style="font-size:.85rem;color:#64748b;margin-bottom:10px">Definir / Atualizar limite</h4>
+    <select id="orc-categoria" class="select-input">
+      <option value="Alimentação">🍽️ Alimentação</option>
+      <option value="Mercado">🛒 Mercado</option>
+      <option value="Saúde">💊 Saúde</option>
+      <option value="Transporte">🚗 Transporte</option>
+      <option value="Combustível">⛽ Combustível</option>
+      <option value="Lazer">🎉 Lazer</option>
+      <option value="Educação">📚 Educação</option>
+      <option value="Vestuário">👕 Vestuário</option>
+      <option value="Casa">🏠 Casa</option>
+      <option value="Assinatura">📱 Assinatura</option>
+      <option value="Restaurante">🍕 Restaurante</option>
+      <option value="Outros">📦 Outros</option>
+    </select>
+    <div class="input-prefix" style="margin-top:8px"><span>R$</span><input id="orc-limite" type="text" inputmode="decimal" placeholder="Ex: 500,00" /></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-orcamentos')">Fechar</button>
+      <button class="btn-confirm btn-verde" onclick="salvarOrcamento()">💾 Salvar limite</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL GASTOS RECORRENTES ══ -->
+<div id="modal-recorrentes" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-recorrentes')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🔁 Gastos Recorrentes</h3>
+    <p class="modal-desc">Gastos que se repetem todo mês. O app os lança automaticamente no dia configurado.</p>
+    <div id="recorrentes-lista" class="rendas-lista"></div>
+    <button class="btn-confirm" style="width:100%;margin-top:8px" onclick="abrirFormRecorrente()">+ Adicionar gasto fixo</button>
+
+    <!-- Formulário -->
+    <div id="recorrente-form" class="renda-form" style="display:none">
+      <hr style="margin:12px 0;opacity:.15">
+      <h4 id="rec-form-titulo" style="margin:0 0 10px;font-size:14px;color:#aaa">Novo gasto recorrente</h4>
+      <input id="rec-id" type="hidden" value="">
+      <input id="rec-desc" type="text" placeholder="Ex: Netflix, Academia, Internet..." />
+      <div class="input-prefix" style="margin-top:8px"><span>R$</span><input id="rec-valor" type="text" inputmode="decimal" placeholder="Ex: 49,90" /></div>
+      <select id="rec-categoria" class="select-input" style="margin-top:8px">
+        <option value="Assinatura">📱 Assinatura</option>
+        <option value="Saúde">💊 Saúde</option>
+        <option value="Educação">📚 Educação</option>
+        <option value="Casa">🏠 Casa</option>
+        <option value="Lazer">🎉 Lazer</option>
+        <option value="Alimentação">🍽️ Alimentação</option>
+        <option value="Transporte">🚗 Transporte</option>
+        <option value="Outros">📦 Outros</option>
+      </select>
+      <div class="renda-tipo-row" style="margin-top:8px">
+        <button class="forma-btn sel" onclick="selRecForma(this,'debito')">💳 Débito</button>
+        <button class="forma-btn" onclick="selRecForma(this,'credito')">💳 Crédito</button>
+        <button class="forma-btn" onclick="selRecForma(this,'pix')">📱 PIX</button>
+      </div>
+      <input id="rec-forma-val" type="hidden" value="debito">
+      <div class="rf-campo" style="margin-top:10px">
+        <label class="input-label">Lançar todo dia</label>
+        <input id="rec-dia" type="number" min="1" max="28" placeholder="Ex: 1, 5, 10..." />
+      </div>
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="fecharFormRecorrente()">Cancelar</button>
+        <button class="btn-confirm btn-verde" onclick="salvarRecorrente()">💾 Salvar</button>
+      </div>
+    </div>
+
+    <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="fecharModal('modal-recorrentes')">Fechar</button>
   </div>
 </div>
 

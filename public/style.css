@@ -752,5 +752,31 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .tx-importado{border-left:3px solid #f59e0b}
 .tx-importado .tx-meta::after{content:' · importado';color:#f59e0b;font-size:.68rem;font-weight:700}
 
+/* Highlight de itens recorrentes */
+.tx-recorrente{border-left:3px solid #6366f1}
+.tx-recorrente .tx-meta::after{content:' · recorrente';color:#818cf8;font-size:.68rem;font-weight:700}
+
 /* Transição suave ao remover */
 .tx-item{transition:opacity .25s, height .25s, padding .25s;overflow:hidden}
+
+/* ── ORÇAMENTOS POR CATEGORIA ── */
+.orcamentos-section{display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+.orc-vazio{background:var(--card);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:10px;color:#64748b;font-size:.85rem;cursor:pointer;border:1px dashed #e2e8f0}
+.orc-barra-item{background:var(--card);border-radius:14px;padding:12px 14px;cursor:pointer;box-shadow:var(--shadow);transition:transform .15s}
+.orc-barra-item:hover{transform:translateY(-2px)}
+.orc-barra-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.orc-cat-label{font-size:.82rem;font-weight:600;color:var(--text)}
+.orc-pct-label{font-size:.78rem;font-weight:700}
+.orc-barra-bg{height:6px;background:#e2e8f0;border-radius:99px;overflow:hidden}
+.orc-barra-fill{height:100%;border-radius:99px;transition:width .5s cubic-bezier(.34,1.56,.64,1)}
+
+/* Modal de orçamentos */
+.orcamentos-lista{display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;margin-bottom:4px}
+.orc-item{background:#f8fafc;border-radius:12px;padding:12px}
+.orc-item-top{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:.84rem;font-weight:600;color:var(--text)}
+.orc-item-top span:first-child{flex:1}
+
+/* ── GASTOS RECORRENTES (herda estilos de .renda-*) ── */
+/* Reutiliza .renda-item, .renda-info, .renda-desc, .renda-detalhe, .renda-item-acoes */
+/* Estilos do modal de recorrentes já herdados dos modais existentes */
+

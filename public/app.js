@@ -327,6 +327,7 @@ async function mostrarApp() {
   document.getElementById('h-nome').textContent = usuario.nome + ' ✏️'
 
   carregarInicio()
+  processarRecorrentesAuto()
   addMsgBot(`${SAUDACOES()}, ${usuario.nome}! 👋\n\nDigite um gasto aqui. Exemplos:\n• "Mercado R$150"\n• "Gasolina R$80 débito"\n• "Farmácia R$45 Nubank"\n\nOu mande "ajuda" para ver todos os comandos.`)
 }
 
@@ -364,6 +365,9 @@ async function carregarInicio() {
     const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
     const dividas = (resumo.totalEmDividas || 0) > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
     document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
+
+    // Orçamentos
+    renderOrcamentosSecao()
 
     // Cartões
     renderCartoesScroll(resumo.cartoes || [])
@@ -642,9 +646,9 @@ function renderContasRow(contas) {
 function txItemHTML(g) {
   const data = new Date(g.data_gasto+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})
   const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
-  const importado = g.origem === 'importado' ? ' tx-importado' : ''
+  const origemClass = g.origem === 'importado' ? ' tx-importado' : g.origem === 'recorrente' ? ' tx-recorrente' : ''
   return `
-    <div class="tx-item${importado}" id="tx-${g.id}">
+    <div class="tx-item${origemClass}" id="tx-${g.id}">
       <div class="tx-emoji">${EMOJI_CAT[g.categoria]||'📦'}</div>
       <div class="tx-info">
         <div class="tx-desc">${g.descricao}</div>
@@ -2048,6 +2052,247 @@ async function criarNovaFamilia() {
   } catch (e) {
     toast('❌ Erro ao criar família: ' + e.message, 'erro')
   }
+}
+
+// ══════════════════════════════════════════
+//  ORÇAMENTOS POR CATEGORIA
+// ══════════════════════════════════════════
+const EMOJI_CAT_ORC = { 'Alimentação':'🍽️','Mercado':'🛒','Saúde':'💊','Farmácia':'💊','Transporte':'🚗','Combustível':'⛽','Educação':'📚','Lazer':'🎉','Vestuário':'👕','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱','Restaurante':'🍕','Outros':'📦' }
+
+async function abrirModalOrcamentos() {
+  document.getElementById('orc-limite').value = ''
+  document.getElementById('modal-orcamentos').style.display = 'flex'
+  await carregarListaOrcamentos()
+}
+
+async function carregarListaOrcamentos() {
+  const el = document.getElementById('orcamentos-lista')
+  try {
+    const [orcs, cats] = await Promise.all([
+      api('/orcamentos' + famQ()),
+      api('/gastos/categorias' + famQ())
+    ])
+    const gastosMap = Object.fromEntries(cats.map(c => [c.categoria, c.total]))
+    if (!orcs.length) {
+      el.innerHTML = '<p style="color:#94a3b8;font-size:.85rem;text-align:center;padding:12px 0">Nenhum orçamento definido ainda.</p>'
+      return
+    }
+    el.innerHTML = orcs.map(o => {
+      const gasto = gastosMap[o.categoria] || 0
+      const pct = o.valor_limite > 0 ? Math.min((gasto / o.valor_limite) * 100, 120) : 0
+      const cor = pct >= 100 ? '#e11d48' : pct >= 80 ? '#f59e0b' : '#059669'
+      const emoji = EMOJI_CAT_ORC[o.categoria] || '📦'
+      return `<div class="orc-item">
+        <div class="orc-item-top">
+          <span>${emoji} ${o.categoria}</span>
+          <span style="color:${cor};font-weight:700;font-size:.82rem">${fmt(gasto)} / ${fmt(o.valor_limite)}</span>
+          <button class="tx-del-btn" style="opacity:1" onclick="deletarOrcamento(${o.id})">🗑</button>
+        </div>
+        <div class="orc-barra-bg">
+          <div class="orc-barra-fill" style="width:${Math.min(pct,100)}%;background:${cor}"></div>
+        </div>
+        <div style="font-size:.7rem;color:${cor};text-align:right;margin-top:2px">${pct.toFixed(0)}% usado${pct>=100?' ⚠️':''}</div>
+      </div>`
+    }).join('')
+  } catch(e) {
+    el.innerHTML = '<p style="color:#e11d48">Erro ao carregar</p>'
+  }
+}
+
+async function salvarOrcamento() {
+  const categoria = document.getElementById('orc-categoria').value
+  const limite = parseBRL(document.getElementById('orc-limite').value)
+  if (!categoria || !limite || limite <= 0) { toast('Informe categoria e valor!', 'erro'); return }
+  try {
+    await api('/orcamentos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, familiaId: famId(), categoria, valorLimite: limite })
+    })
+    document.getElementById('orc-limite').value = ''
+    toast(`✅ Orçamento de ${fmt(limite)} para ${categoria} salvo!`)
+    await carregarListaOrcamentos()
+    renderOrcamentosSecao()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+}
+
+async function deletarOrcamento(id) {
+  if (!confirm('Remover este orçamento?')) return
+  await api(`/orcamentos/${id}`, { method: 'DELETE' })
+  toast('🗑️ Orçamento removido')
+  await carregarListaOrcamentos()
+  renderOrcamentosSecao()
+}
+
+async function renderOrcamentosSecao() {
+  const el = document.getElementById('orcamentos-section')
+  if (!el) return
+  try {
+    const [orcs, cats] = await Promise.all([
+      api('/orcamentos' + famQ()),
+      api('/gastos/categorias' + famQ())
+    ])
+    if (!orcs.length) {
+      el.innerHTML = `<div class="orc-vazio" onclick="abrirModalOrcamentos()">
+        <span>🎯</span> <span>Defina limites por categoria para receber alertas</span>
+      </div>`
+      return
+    }
+    const gastosMap = Object.fromEntries(cats.map(c => [c.categoria, c.total]))
+    el.innerHTML = orcs.map(o => {
+      const gasto = gastosMap[o.categoria] || 0
+      const pct = o.valor_limite > 0 ? Math.min((gasto / o.valor_limite) * 100, 120) : 0
+      const cor = pct >= 100 ? '#e11d48' : pct >= 80 ? '#f59e0b' : '#059669'
+      const emoji = EMOJI_CAT_ORC[o.categoria] || '📦'
+      return `<div class="orc-barra-item" onclick="abrirModalOrcamentos()">
+        <div class="orc-barra-row">
+          <span class="orc-cat-label">${emoji} ${o.categoria}</span>
+          <span class="orc-pct-label" style="color:${cor}">${fmt(gasto)} <span style="color:#64748b">/ ${fmt(o.valor_limite)}</span></span>
+        </div>
+        <div class="orc-barra-bg">
+          <div class="orc-barra-fill" style="width:${Math.min(pct,100)}%;background:${cor};transition:width .5s"></div>
+        </div>
+      </div>`
+    }).join('')
+  } catch(e) {}
+}
+
+// ══════════════════════════════════════════
+//  GASTOS RECORRENTES
+// ══════════════════════════════════════════
+let recFormaAtual = 'debito'
+let recEdicaoId = null
+
+async function abrirModalRecorrentes() {
+  document.getElementById('modal-recorrentes').style.display = 'flex'
+  fecharFormRecorrente()
+  await carregarListaRecorrentes()
+  // Processar recorrentes do mês ao abrir
+  processarRecorrentesAuto()
+}
+
+async function carregarListaRecorrentes() {
+  const el = document.getElementById('recorrentes-lista')
+  try {
+    const lista = await api('/recorrentes' + famQ())
+    if (!lista.length) {
+      el.innerHTML = '<p style="color:#94a3b8;font-size:.85rem;text-align:center;padding:12px 0">Nenhum gasto recorrente cadastrado.</p>'
+      return
+    }
+    el.innerHTML = lista.map(r => {
+      const cat = EMOJI_CAT_ORC[r.categoria] || '📦'
+      const diaLabel = `Todo dia ${r.dia_mes}`
+      const pausado = !r.ativa ? ' <span style="color:#f59e0b;font-size:.7rem">⏸ pausado</span>' : ''
+      return `<div class="renda-item">
+        <div class="renda-item-top">
+          <span class="renda-item-desc">${cat} ${r.descricao}${pausado}</span>
+          <span class="renda-item-val">${fmt(r.valor)}</span>
+        </div>
+        <div class="renda-item-bot">
+          <span class="renda-item-tipo">${diaLabel} · ${r.categoria}</span>
+          ${r.usuario_nome ? `<span class="renda-item-user">👤 ${r.usuario_nome}</span>` : ''}
+        </div>
+        <div class="renda-item-acoes">
+          <button onclick="editarRecorrente(${JSON.stringify(r).replace(/"/g,'&quot;')})">✏️ Editar</button>
+          <button class="btn-excluir" onclick="deletarRecorrente(${r.id})">🗑 Excluir</button>
+        </div>
+      </div>`
+    }).join('')
+  } catch(e) {
+    el.innerHTML = '<p style="color:#e11d48">Erro ao carregar</p>'
+  }
+}
+
+function abrirFormRecorrente() {
+  recEdicaoId = null
+  recFormaAtual = 'debito'
+  document.getElementById('rec-id').value = ''
+  document.getElementById('rec-desc').value = ''
+  document.getElementById('rec-valor').value = ''
+  document.getElementById('rec-categoria').value = 'Assinatura'
+  document.getElementById('rec-dia').value = '1'
+  document.getElementById('rec-forma-val').value = 'debito'
+  document.getElementById('rec-form-titulo').textContent = 'Novo gasto recorrente'
+  document.querySelectorAll('#recorrente-form .forma-btn').forEach((b, i) => b.classList.toggle('sel', i === 0))
+  document.getElementById('recorrente-form').style.display = 'block'
+}
+
+function fecharFormRecorrente() {
+  document.getElementById('recorrente-form').style.display = 'none'
+}
+
+function selRecForma(btn, forma) {
+  document.querySelectorAll('#recorrente-form .forma-btn').forEach(b => b.classList.remove('sel'))
+  btn.classList.add('sel')
+  recFormaAtual = forma
+  document.getElementById('rec-forma-val').value = forma
+}
+
+function editarRecorrente(r) {
+  recEdicaoId = r.id
+  document.getElementById('rec-id').value = r.id
+  document.getElementById('rec-desc').value = r.descricao
+  document.getElementById('rec-valor').value = String(r.valor).replace('.', ',')
+  document.getElementById('rec-categoria').value = r.categoria || 'Outros'
+  document.getElementById('rec-dia').value = r.dia_mes || 1
+  recFormaAtual = r.forma_pagamento || 'debito'
+  document.getElementById('rec-forma-val').value = recFormaAtual
+  document.querySelectorAll('#recorrente-form .forma-btn').forEach(b => {
+    b.classList.toggle('sel', b.getAttribute('onclick').includes(`'${recFormaAtual}'`))
+  })
+  document.getElementById('rec-form-titulo').textContent = 'Editar gasto recorrente'
+  document.getElementById('recorrente-form').style.display = 'block'
+}
+
+async function salvarRecorrente() {
+  const desc = document.getElementById('rec-desc').value.trim()
+  const valor = parseBRL(document.getElementById('rec-valor').value)
+  const categoria = document.getElementById('rec-categoria').value
+  const forma = recFormaAtual
+  const dia = parseInt(document.getElementById('rec-dia').value) || 1
+  if (!desc || !valor || valor <= 0) { toast('Preencha descrição e valor!', 'erro'); return }
+  try {
+    if (recEdicaoId) {
+      await api(`/recorrentes/${recEdicaoId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, ativa: 1 })
+      })
+      toast(`✅ "${desc}" atualizado!`)
+    } else {
+      await api('/recorrentes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuarioId: usuario.id, descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia })
+      })
+      toast(`✅ "${desc}" adicionado! Será lançado todo dia ${dia}.`)
+    }
+    fecharFormRecorrente()
+    await carregarListaRecorrentes()
+    await processarRecorrentesAuto()
+    carregarInicio()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+}
+
+async function deletarRecorrente(id) {
+  if (!confirm('Excluir este gasto recorrente?')) return
+  await api(`/recorrentes/${id}`, { method: 'DELETE' })
+  toast('🗑️ Gasto recorrente removido')
+  await carregarListaRecorrentes()
+}
+
+async function processarRecorrentesAuto() {
+  try {
+    const res = await api('/recorrentes/processar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familiaId: famId(), usuarioId: usuario?.id })
+    })
+    if (res.criados > 0) {
+      toast(`🔁 ${res.criados} gasto(s) recorrente(s) lançado(s) automaticamente!`)
+      carregarInicio()
+    }
+  } catch(e) { /* silently ignore */ }
 }
 
 // ── START ──

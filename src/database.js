@@ -13,6 +13,7 @@ try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch
 try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN recorrente_id INTEGER") } catch(e) {}
 try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
@@ -138,6 +139,29 @@ db.exec(`
     dia_mes INTEGER,
     dia_semana INTEGER,
     observacao TEXT,
+    ativa INTEGER DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS orcamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    familia_id INTEGER DEFAULT 1,
+    categoria TEXT NOT NULL,
+    valor_limite REAL NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS gastos_recorrentes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    descricao TEXT NOT NULL,
+    valor REAL NOT NULL,
+    categoria TEXT DEFAULT 'Outros',
+    forma_pagamento TEXT DEFAULT 'debito',
+    dia_mes INTEGER DEFAULT 1,
     ativa INTEGER DEFAULT 1,
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
@@ -528,6 +552,63 @@ function limparGastosImportados(familiaId = null, usuarioId = null) {
   return { changes: 0 }
 }
 
+// ===== ORÇAMENTOS POR CATEGORIA =====
+function listarOrcamentos(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT * FROM orcamentos WHERE usuario_id = ? ORDER BY categoria').all(usuarioId)
+  if (familiaId) return db.prepare('SELECT o.*, u.nome as usuario_nome FROM orcamentos o JOIN usuarios u ON o.usuario_id = u.id WHERE o.familia_id = ? ORDER BY o.categoria').all(familiaId)
+  return db.prepare('SELECT * FROM orcamentos ORDER BY categoria').all()
+}
+function salvarOrcamento(usuarioId, familiaId, categoria, valorLimite) {
+  const ex = db.prepare('SELECT id FROM orcamentos WHERE usuario_id = ? AND categoria = ?').get(usuarioId, categoria)
+  if (ex) return db.prepare('UPDATE orcamentos SET valor_limite = ? WHERE id = ?').run(valorLimite, ex.id)
+  return db.prepare('INSERT INTO orcamentos (usuario_id, familia_id, categoria, valor_limite) VALUES (?, ?, ?, ?)').run(usuarioId, familiaId || 1, categoria, valorLimite)
+}
+function deletarOrcamento(id) {
+  return db.prepare('DELETE FROM orcamentos WHERE id = ?').run(id)
+}
+
+// ===== GASTOS RECORRENTES =====
+function listarRecorrentes(familiaId = null, usuarioId = null) {
+  if (usuarioId) return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE gr.usuario_id = ? ORDER BY gr.dia_mes, gr.descricao').all(usuarioId)
+  if (familiaId) return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE u.familia_id = ? ORDER BY u.nome, gr.dia_mes').all(familiaId)
+  return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id ORDER BY gr.criado_em').all()
+}
+function salvarRecorrente(usuarioId, descricao, valor, categoria, formaPagamento, diaMes) {
+  return db.prepare('INSERT INTO gastos_recorrentes (usuario_id, descricao, valor, categoria, forma_pagamento, dia_mes) VALUES (?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, categoria || 'Outros', formaPagamento || 'debito', diaMes || 1)
+}
+function atualizarRecorrente(id, descricao, valor, categoria, formaPagamento, diaMes, ativa) {
+  return db.prepare('UPDATE gastos_recorrentes SET descricao=?, valor=?, categoria=?, forma_pagamento=?, dia_mes=?, ativa=? WHERE id=?').run(descricao, valor, categoria, formaPagamento, diaMes, ativa ?? 1, id)
+}
+function deletarRecorrente(id) {
+  return db.prepare('DELETE FROM gastos_recorrentes WHERE id = ?').run(id)
+}
+function processarRecorrentes(familiaId = null, usuarioId = null) {
+  const now = new Date()
+  const diaHoje = now.getDate()
+  const mesStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+
+  let recorrentes
+  if (usuarioId) {
+    recorrentes = db.prepare('SELECT * FROM gastos_recorrentes WHERE usuario_id = ? AND ativa = 1').all(usuarioId)
+  } else if (familiaId) {
+    recorrentes = db.prepare('SELECT gr.* FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE u.familia_id = ? AND gr.ativa = 1').all(familiaId)
+  } else {
+    recorrentes = db.prepare('SELECT * FROM gastos_recorrentes WHERE ativa = 1').all()
+  }
+
+  let criados = 0
+  for (const r of recorrentes) {
+    if (diaHoje < r.dia_mes) continue // ainda não chegou o dia
+    const existente = db.prepare("SELECT id FROM gastos WHERE recorrente_id = ? AND strftime('%Y-%m', data_gasto) = ?").get(r.id, mesStr)
+    if (existente) continue
+    const diaStr = String(Math.min(r.dia_mes, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate())).padStart(2, '0')
+    const dataGasto = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${diaStr}`
+    db.prepare("INSERT INTO gastos (usuario_id, descricao, valor, categoria, forma_pagamento, data_gasto, origem, recorrente_id, parcelas, parcela_atual) VALUES (?, ?, ?, ?, ?, ?, 'recorrente', ?, 1, 1)").run(r.usuario_id, r.descricao, r.valor, r.categoria, r.forma_pagamento, dataGasto, r.id)
+    criados++
+  }
+  return criados
+}
+
 // ===== DUPLICATAS =====
 function verificarDuplicataGasto(usuarioId, descricao, valor, data) {
   if (data) {
@@ -585,5 +666,7 @@ module.exports = {
   verificarDuplicataGasto,
   listarGastosExport, listarReceitasExport,
   alertasVencimento,
+  listarOrcamentos, salvarOrcamento, deletarOrcamento,
+  listarRecorrentes, salvarRecorrente, atualizarRecorrente, deletarRecorrente, processarRecorrentes,
   resumoFinanceiro
 }
