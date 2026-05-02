@@ -639,26 +639,44 @@ function renderContasRow(contas) {
   }).join('') + `<div class="conta-vazia" onclick="abrirModalConta()"><span>＋</span> Nova conta</div>`
 }
 
+function txItemHTML(g) {
+  const data = new Date(g.data_gasto+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})
+  const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
+  const importado = g.origem === 'importado' ? ' tx-importado' : ''
+  return `
+    <div class="tx-item${importado}" id="tx-${g.id}">
+      <div class="tx-emoji">${EMOJI_CAT[g.categoria]||'📦'}</div>
+      <div class="tx-info">
+        <div class="tx-desc">${g.descricao}</div>
+        <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
+      </div>
+      <div class="tx-right">
+        <div class="tx-valor">- ${fmt(g.valor)}</div>
+        <button class="tx-del-btn" onclick="excluirGasto(${g.id})" title="Excluir">✕</button>
+      </div>
+    </div>`
+}
+
 function renderTransacoes(gastos) {
   const el = document.getElementById('inicio-transacoes')
   if (!gastos.length) {
     el.innerHTML = `<div class="tx-vazio">📭 Nenhum gasto ainda.<br>Lance pelo chat!</div>`
     return
   }
-  el.innerHTML = gastos.map(g => {
-    const data = new Date(g.data_gasto+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})
-    const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
-    return `
-      <div class="tx-item">
-        <div class="tx-emoji">${EMOJI_CAT[g.categoria]||'📦'}</div>
-        <div class="tx-info">
-          <div class="tx-desc">${g.descricao}</div>
-          <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
-        </div>
-        <div class="tx-valor">- ${fmt(g.valor)}</div>
-      </div>
-    `
-  }).join('')
+  el.innerHTML = gastos.map(txItemHTML).join('')
+}
+
+async function excluirGasto(id) {
+  if (!confirm('Excluir este lançamento?')) return
+  try {
+    await api(`/gastos/${id}`, { method: 'DELETE' })
+    const el = document.getElementById(`tx-${id}`)
+    if (el) { el.style.opacity = '0'; el.style.height = '0'; setTimeout(() => el.remove(), 250) }
+    toast('🗑️ Lançamento removido')
+    carregarInicio()
+  } catch(e) {
+    toast('❌ ' + e.message, 'erro')
+  }
 }
 
 // ── CHAT ──
@@ -913,19 +931,7 @@ async function carregarContas() {
     if (!gastos.length) {
       txEl.innerHTML = `<div class="tx-vazio">📭 Nenhuma movimentação ainda.</div>`
     } else {
-      txEl.innerHTML = gastos.slice(0, 10).map(g => {
-        const data = new Date(g.data_gasto + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
-        const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
-        return `
-        <div class="tx-item">
-          <div class="tx-emoji">${EMOJI_CAT[g.categoria] || '📦'}</div>
-          <div class="tx-info">
-            <div class="tx-desc">${g.descricao}</div>
-            <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
-          </div>
-          <div class="tx-valor">- ${fmt(g.valor)}</div>
-        </div>`
-      }).join('')
+      txEl.innerHTML = gastos.slice(0, 10).map(txItemHTML).join('')
     }
   } catch (e) {
     console.error('carregarContas:', e)

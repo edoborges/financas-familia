@@ -735,3 +735,22 @@ select {
   cursor: pointer;
 }
 select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,241,.12); background: #fff; }
+
+/* ── DELETE TRANSACTION ── */
+.tx-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tx-del-btn{
+  background:none;border:none;cursor:pointer;
+  color:#cbd5e1;font-size:.8rem;font-weight:700;
+  width:26px;height:26px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .18s;flex-shrink:0;opacity:0;
+}
+.tx-item:hover .tx-del-btn,.tx-item:focus-within .tx-del-btn{opacity:1}
+.tx-del-btn:hover{background:#fee2e2;color:#e11d48}
+
+/* Highlight de itens importados */
+.tx-importado{border-left:3px solid #f59e0b}
+.tx-importado .tx-meta::after{content:' · importado';color:#f59e0b;font-size:.68rem;font-weight:700}
+
+/* Transição suave ao remover */
+.tx-item{transition:opacity .25s, height .25s, padding .25s;overflow:hidden}
