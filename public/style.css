@@ -777,6 +777,54 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .orc-item-top span:first-child{flex:1}
 
 /* ── GASTOS RECORRENTES (herda estilos de .renda-*) ── */
-/* Reutiliza .renda-item, .renda-info, .renda-desc, .renda-detalhe, .renda-item-acoes */
-/* Estilos do modal de recorrentes já herdados dos modais existentes */
+/* Reutiliza .renda-item, .renda-item-top, .renda-item-desc, .renda-item-val, etc. */
+
+/* ── SKELETON LOADING ── */
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.sk-circle,.sk-line{background:linear-gradient(90deg,#e2e8f0 25%,#f1f5f9 50%,#e2e8f0 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:8px}
+.sk-circle{width:38px;height:38px;border-radius:50%;flex-shrink:0}
+.sk-line{height:12px;border-radius:6px;margin-bottom:4px}
+.sk-lines{flex:1;display:flex;flex-direction:column;justify-content:center;gap:6px}
+.tx-skeleton{pointer-events:none;cursor:default}
+.saude-skeleton{display:flex;align-items:center;gap:14px;padding:4px 0}
+.saude-skeleton .sk-circle{width:64px;height:64px;border-radius:50%;flex-shrink:0}
+
+/* ── SWIPE TO DELETE ── */
+.tx-item{position:relative;transition:transform .2s ease,opacity .25s,height .25s,padding .25s;overflow:hidden}
+.tx-item.swiped-open{transform:translateX(-68px) !important}
+.tx-item.swiped-open .tx-del-btn{opacity:1 !important;background:#e11d48;color:#fff;border-radius:10px;width:60px;height:100%;position:absolute;right:-68px;top:0;border-radius:0 12px 12px 0;display:flex;align-items:center;justify-content:center}
+
+/* ── SAÚDE FINANCEIRA ── */
+.saude-card{background:var(--card);border-radius:20px;padding:16px;margin-bottom:12px;box-shadow:var(--shadow);cursor:pointer;transition:transform .2s;border:1px solid rgba(0,0,0,.04)}
+.saude-card:hover{transform:translateY(-2px)}
+.saude-card:active{transform:scale(.99)}
+.saude-top{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+.saude-ring-wrap{position:relative;width:64px;height:64px;flex-shrink:0}
+.saude-ring{width:64px;height:64px;transform:rotate(-90deg)}
+.saude-score-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-weight:800;transform:rotate(90deg)}
+.saude-info{flex:1;min-width:0}
+.saude-titulo{font-size:.82rem;font-weight:700;color:#475569;margin-bottom:4px}
+.saude-nota{display:inline-block;font-size:.75rem;font-weight:800;padding:2px 10px;border-radius:20px;margin-bottom:4px;letter-spacing:.3px}
+.saude-desc{font-size:.78rem;color:#64748b;font-weight:500}
+.saude-barras{display:flex;flex-direction:column;gap:6px}
+.saude-barra-item{display:flex;flex-direction:column;gap:3px}
+.saude-barra-row{display:flex;justify-content:space-between;align-items:center}
+.saude-barra-label{font-size:.72rem;font-weight:600;color:#64748b}
+.saude-barra-pts{font-size:.72rem;font-weight:700}
+.saude-tap{font-size:.68rem;color:#94a3b8;text-align:right;margin-top:6px;font-style:italic}
+
+/* Modal de detalhes da saúde */
+.saude-detalhe-score{text-align:center;padding:16px 0 8px;border-bottom:1px solid #f1f5f9;margin-bottom:16px}
+.saude-detalhe-num{font-size:3rem;font-weight:900;letter-spacing:-2px;line-height:1}
+.saude-detalhe-nota{font-size:1rem;font-weight:700;margin:4px 0}
+.saude-detalhe-desc{font-size:.82rem;color:#64748b}
+.saude-detalhe-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.saude-d-item{background:#f8fafc;border-radius:14px;padding:12px}
+.saude-d-label{font-size:.7rem;font-weight:600;color:#64748b;margin-bottom:4px}
+.saude-d-valor{font-size:1rem;font-weight:800;margin-bottom:2px}
+.saude-d-sub{font-size:.68rem;color:#94a3b8}
+.saude-dicas{background:#f8fafc;border-radius:14px;padding:14px}
+.saude-dica-titulo{font-size:.78rem;font-weight:700;color:#475569;margin-bottom:8px}
+.saude-dica{font-size:.8rem;color:#334155;padding:6px 0;border-bottom:1px solid #e2e8f0;line-height:1.4}
+.saude-dica:last-child{border-bottom:none}
 

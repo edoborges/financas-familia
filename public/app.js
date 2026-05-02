@@ -335,7 +335,13 @@ async function mostrarApp() {
 async function carregarInicio() {
   try {
     atualizarBadgeVisao()
-    const [resumo, gastos] = await Promise.all([api('/resumo' + famQ()), api('/gastos/recentes' + famQ())])
+    renderSkeletonInicio()
+    const [resumo, gastos, orcs, cats] = await Promise.all([
+      api('/resumo' + famQ()),
+      api('/gastos/recentes' + famQ()),
+      api('/orcamentos' + famQ()),
+      api('/gastos/categorias' + famQ())
+    ])
 
     // Balance
     const rendaTotal = resumo.rendaTotal || resumo.salarioTotal || 0
@@ -365,6 +371,10 @@ async function carregarInicio() {
     const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
     const dividas = (resumo.totalEmDividas || 0) > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
     document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
+
+    // Score de saúde financeira
+    const score = calcularScore(resumo, orcs, cats)
+    renderScoreCard(score)
 
     // Orçamentos
     renderOrcamentosSecao()
@@ -668,6 +678,7 @@ function renderTransacoes(gastos) {
     return
   }
   el.innerHTML = gastos.map(txItemHTML).join('')
+  setupSwipeItems()
 }
 
 async function excluirGasto(id) {
@@ -2052,6 +2063,237 @@ async function criarNovaFamilia() {
   } catch (e) {
     toast('❌ Erro ao criar família: ' + e.message, 'erro')
   }
+}
+
+// ══════════════════════════════════════════
+//  SKELETON LOADING
+// ══════════════════════════════════════════
+function renderSkeletonInicio() {
+  // Skeleton no score card
+  const scoreEl = document.getElementById('saude-score-card')
+  if (scoreEl && !_saudeData) {
+    scoreEl.innerHTML = `<div class="saude-skeleton">
+      <div class="sk-circle"></div>
+      <div class="sk-lines"><div class="sk-line" style="width:60%"></div><div class="sk-line" style="width:40%"></div></div>
+    </div>`
+  }
+  // Skeleton nas transações
+  const txEl = document.getElementById('inicio-transacoes')
+  if (txEl) {
+    txEl.innerHTML = Array(4).fill(0).map(() => `
+      <div class="tx-item tx-skeleton">
+        <div class="sk-circle" style="width:38px;height:38px;border-radius:50%;flex-shrink:0"></div>
+        <div class="sk-lines" style="flex:1">
+          <div class="sk-line" style="width:55%"></div>
+          <div class="sk-line" style="width:35%;margin-top:6px"></div>
+        </div>
+        <div class="sk-line" style="width:70px;height:16px;border-radius:6px"></div>
+      </div>`).join('')
+  }
+}
+
+// ══════════════════════════════════════════
+//  SWIPE TO DELETE (transações mobile)
+// ══════════════════════════════════════════
+function setupSwipeItems() {
+  document.querySelectorAll('.tx-item[id^="tx-"]').forEach(el => {
+    let x0 = 0, y0 = 0, swiped = false, active = false
+
+    el.addEventListener('touchstart', e => {
+      x0 = e.touches[0].clientX
+      y0 = e.touches[0].clientY
+      swiped = false
+      active = true
+    }, { passive: true })
+
+    el.addEventListener('touchmove', e => {
+      if (!active) return
+      const dx = e.touches[0].clientX - x0
+      const dy = e.touches[0].clientY - y0
+      // Se for scroll vertical, cancela gesto
+      if (Math.abs(dy) > Math.abs(dx) + 5) { active = false; return }
+      if (dx < -20) {
+        const offset = Math.max(dx, -72)
+        el.style.transform = `translateX(${offset}px)`
+        swiped = offset < -55
+      } else {
+        el.style.transform = ''
+        swiped = false
+      }
+    }, { passive: true })
+
+    el.addEventListener('touchend', () => {
+      active = false
+      if (swiped) {
+        el.classList.add('swiped-open')
+        el.style.transform = 'translateX(-68px)'
+        // Auto-reset após 4s sem ação
+        setTimeout(() => {
+          el.classList.remove('swiped-open')
+          el.style.transform = ''
+        }, 4000)
+      } else {
+        el.classList.remove('swiped-open')
+        el.style.transform = ''
+      }
+    })
+  })
+}
+
+// ══════════════════════════════════════════
+//  SCORE DE SAÚDE FINANCEIRA
+// ══════════════════════════════════════════
+let _saudeData = null
+
+function calcularScore(resumo, orcamentos = [], cats = []) {
+  const renda = resumo.rendaTotal || resumo.salarioTotal || 0
+  const gastos = resumo.gastosMes || 0
+  const saldoContas = resumo.saldoContas || 0
+  const dividas = resumo.totalEmDividas || 0
+
+  // 1. Economia (35 pts): % da renda economizada
+  let scoreEconomia = 0
+  if (renda > 0) {
+    const pctSalvo = Math.max(0, (renda - gastos) / renda)
+    if (pctSalvo >= 0.20) scoreEconomia = 35
+    else if (pctSalvo >= 0.10) scoreEconomia = 25
+    else if (pctSalvo >= 0.05) scoreEconomia = 15
+    else if (pctSalvo > 0) scoreEconomia = 5
+  }
+
+  // 2. Orçamentos (25 pts): categorias dentro do limite
+  let scoreOrc = 25
+  if (orcamentos.length > 0 && cats.length > 0) {
+    const gastosMap = Object.fromEntries(cats.map(c => [c.categoria, c.total]))
+    const estouros = orcamentos.filter(o => (gastosMap[o.categoria] || 0) > o.valor_limite).length
+    scoreOrc = Math.max(0, Math.round(25 * (1 - estouros / orcamentos.length)))
+  }
+
+  // 3. Dívidas (20 pts): proporção de dívidas vs renda mensal
+  let scoreDividas = 20
+  if (renda > 0 && dividas > 0) {
+    const ratio = dividas / (renda * 12)
+    if (ratio > 1.5) scoreDividas = 0
+    else if (ratio > 1.0) scoreDividas = 3
+    else if (ratio > 0.5) scoreDividas = 8
+    else if (ratio > 0.25) scoreDividas = 13
+    else scoreDividas = 17
+  }
+
+  // 4. Contas / reserva (20 pts): saldo positivo em contas
+  let scoreContas = 0
+  if (saldoContas > 0) {
+    if (saldoContas >= renda * 3) scoreContas = 20
+    else if (saldoContas >= renda) scoreContas = 15
+    else if (saldoContas >= renda * 0.5) scoreContas = 10
+    else scoreContas = 5
+  }
+
+  const total = scoreEconomia + scoreOrc + scoreDividas + scoreContas
+  const nota = total >= 80 ? 'A' : total >= 60 ? 'B' : total >= 40 ? 'C' : 'D'
+  const cor = total >= 80 ? '#10b981' : total >= 60 ? '#6366f1' : total >= 40 ? '#f59e0b' : '#e11d48'
+  const desc = total >= 80 ? 'Excelente — continue assim!' : total >= 60 ? 'Boa — ainda tem espaço para melhorar' : total >= 40 ? 'Regular — atenção aos gastos' : 'Crítica — revise seu orçamento'
+
+  _saudeData = { total, nota, cor, desc, scoreEconomia, scoreOrc, scoreDividas, scoreContas, renda, gastos, dividas, saldoContas }
+  return _saudeData
+}
+
+function renderScoreCard(s) {
+  const el = document.getElementById('saude-score-card')
+  if (!el) return
+
+  const ringColor = s.cor
+  const pct = s.total
+  // SVG ring: circumference = 2π×30 ≈ 188.5
+  const circ = 188.5
+  const dash = (pct / 100) * circ
+
+  el.innerHTML = `
+    <div class="saude-top">
+      <div class="saude-ring-wrap">
+        <svg class="saude-ring" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="30" fill="none" stroke="#e2e8f0" stroke-width="7"/>
+          <circle cx="36" cy="36" r="30" fill="none" stroke="${ringColor}" stroke-width="7"
+            stroke-dasharray="${dash} ${circ}" stroke-dashoffset="${circ * 0.25}"
+            stroke-linecap="round" style="transition:stroke-dasharray .8s ease"/>
+        </svg>
+        <div class="saude-score-num" style="color:${ringColor}">${pct}</div>
+      </div>
+      <div class="saude-info">
+        <div class="saude-titulo">💚 Saúde Financeira</div>
+        <div class="saude-nota" style="background:${ringColor}20;color:${ringColor}">Nota ${s.nota}</div>
+        <div class="saude-desc">${s.desc}</div>
+      </div>
+    </div>
+    <div class="saude-barras">
+      ${saudeBarra('Economia', s.scoreEconomia, 35, s.cor)}
+      ${saudeBarra('Orçamentos', s.scoreOrc, 25, s.cor)}
+      ${saudeBarra('Dívidas', s.scoreDividas, 20, s.cor)}
+      ${saudeBarra('Reserva', s.scoreContas, 20, s.cor)}
+    </div>
+    <div class="saude-tap">Toque para detalhes</div>
+  `
+}
+
+function saudeBarra(label, pts, max, cor) {
+  const pct = max > 0 ? Math.min((pts / max) * 100, 100) : 0
+  const corBarra = pts >= max * 0.8 ? '#10b981' : pts >= max * 0.5 ? '#6366f1' : pts >= max * 0.25 ? '#f59e0b' : '#e11d48'
+  return `<div class="saude-barra-item">
+    <div class="saude-barra-row">
+      <span class="saude-barra-label">${label}</span>
+      <span class="saude-barra-pts" style="color:${corBarra}">${pts}/${max}</span>
+    </div>
+    <div class="orc-barra-bg"><div class="orc-barra-fill" style="width:${pct}%;background:${corBarra}"></div></div>
+  </div>`
+}
+
+function abrirDetalhesSaude() {
+  if (!_saudeData) return
+  const s = _saudeData
+  const renda = s.renda
+  const gastos = s.gastos
+  const economia = renda - gastos
+  const pctSalvo = renda > 0 ? ((economia / renda) * 100).toFixed(0) : 0
+
+  document.getElementById('saude-detalhe-conteudo').innerHTML = `
+    <div class="saude-detalhe-score" style="color:${s.cor}">
+      <div class="saude-detalhe-num">${s.total}</div>
+      <div class="saude-detalhe-nota">Nota ${s.nota}</div>
+      <div class="saude-detalhe-desc">${s.desc}</div>
+    </div>
+    <div class="saude-detalhe-grid">
+      <div class="saude-d-item">
+        <div class="saude-d-label">💰 Economia do mês</div>
+        <div class="saude-d-valor" style="color:${economia>=0?'#10b981':'#e11d48'}">${economia>=0?'+':''}${fmt(economia)}</div>
+        <div class="saude-d-sub">${pctSalvo}% da renda guardada</div>
+      </div>
+      <div class="saude-d-item">
+        <div class="saude-d-label">💸 Dívidas em aberto</div>
+        <div class="saude-d-valor" style="color:${s.dividas>0?'#e11d48':'#10b981'}">${fmt(s.dividas)}</div>
+        <div class="saude-d-sub">${renda > 0 ? ((s.dividas/(renda*12))*100).toFixed(0) : 0}% da renda anual</div>
+      </div>
+      <div class="saude-d-item">
+        <div class="saude-d-label">🏦 Saldo em contas</div>
+        <div class="saude-d-valor" style="color:${s.saldoContas>=0?'#6366f1':'#e11d48'}">${fmt(s.saldoContas)}</div>
+        <div class="saude-d-sub">${renda > 0 ? (s.saldoContas / renda).toFixed(1) : '—'} meses de reserva</div>
+      </div>
+    </div>
+    <div class="saude-dicas">
+      <div class="saude-dica-titulo">💡 Dicas para melhorar</div>
+      ${gerarDicasSaude(s)}
+    </div>
+  `
+  document.getElementById('modal-saude').style.display = 'flex'
+}
+
+function gerarDicasSaude(s) {
+  const dicas = []
+  if (s.scoreEconomia < 25) dicas.push('🎯 Tente economizar pelo menos 10% da renda todo mês.')
+  if (s.scoreOrc < 20) dicas.push('📊 Defina orçamentos por categoria e monitore os estouros.')
+  if (s.scoreDividas < 15) dicas.push('💸 Priorize quitar as dívidas com maior taxa de juros.')
+  if (s.scoreContas < 10) dicas.push('🏦 Construa uma reserva de emergência de 3-6 meses de gastos.')
+  if (!dicas.length) dicas.push('✅ Suas finanças estão ótimas! Continue assim.')
+  return dicas.map(d => `<div class="saude-dica">${d}</div>`).join('')
 }
 
 // ══════════════════════════════════════════

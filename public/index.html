@@ -167,6 +167,9 @@
         </div>
       </div>
 
+      <!-- Score de saúde financeira -->
+      <div id="saude-score-card" class="saude-card" onclick="abrirDetalhesSaude()"></div>
+
       <!-- Ações rápidas -->
       <div class="acoes-rapidas">
         <button class="acao-btn" onclick="abrirModalGasto()">
@@ -808,6 +811,18 @@
     <div class="modal-btns">
       <button class="btn-cancel" onclick="fecharModal('modal-gasto')">Cancelar</button>
       <button class="btn-confirm" onclick="salvarGastoManual()">💸 Lançar Gasto</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL SAÚDE FINANCEIRA ══ -->
+<div id="modal-saude" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-saude')">
+  <div class="modal-sheet plano-sheet">
+    <div class="modal-handle"></div>
+    <h3>💚 Saúde Financeira</h3>
+    <div id="saude-detalhe-conteudo"></div>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="btn-confirm" onclick="fecharModal('modal-saude')">Fechar</button>
     </div>
   </div>
 </div>
