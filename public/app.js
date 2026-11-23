@@ -92,9 +92,25 @@ function parseBRL(str) {
     .replace(',', '.')         // troca vírgula decimal por ponto
   return parseFloat(s) || 0
 }
-const api = async (url, opts) => {
-  const r = await fetch('/api' + url, opts)
+// Token de sessão recebido no login; vai em todo pedido para o servidor.
+const lerToken = () => { try { return localStorage.getItem('fin_token') } catch(e) { return null } }
+const comToken = (headers = {}) => {
+  const t = lerToken()
+  return t ? { ...headers, Authorization: 'Bearer ' + t } : headers
+}
+let _sessaoCaiu = false
+function sessaoExpirada() {
+  if (_sessaoCaiu) return
+  _sessaoCaiu = true
+  try { localStorage.removeItem('fin_usuario'); localStorage.removeItem('fin_token') } catch(e) {}
+  alert('Sua sessão expirou. Entre de novo com seu PIN.')
+  location.reload()
+}
+
+const api = async (url, opts = {}) => {
+  const r = await fetch('/api' + url, { ...opts, headers: comToken(opts.headers) })
   const data = await r.json().catch(() => ({ erro: `HTTP ${r.status}` }))
+  if (r.status === 401 && url !== '/login') sessaoExpirada()
   if (!r.ok) {
     console.error(`API ${opts?.method||'GET'} ${url} →`, r.status, data)
     throw Object.assign(new Error(data.erro || `Erro ${r.status}`), { status: r.status, data })
@@ -123,7 +139,9 @@ async function init() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js')
 
   const salvo = localStorage.getItem('fin_usuario')
-  if (salvo) {
+  // Login feito antes da tranca não tem token: precisa entrar de novo uma vez.
+  if (salvo && !lerToken()) localStorage.removeItem('fin_usuario')
+  else if (salvo) {
     try {
       usuario = JSON.parse(salvo)
       usuario.id = Number(usuario.id)
@@ -166,8 +184,10 @@ async function concluirSetup() {
   if (!/^\d{4}$/.test(p1)) { alert('PIN do 1º usuário: exatamente 4 dígitos!'); return }
   if (!/^\d{4}$/.test(p2)) { alert('PIN do 2º usuário: exatamente 4 dígitos!'); return }
 
-  await api('/usuarios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:n1,salario:s1,telefone:c1,pin:p1})})
-  await api('/usuarios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:n2,salario:s2,telefone:c2,pin:p2})})
+  await api('/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuarios:[
+    {nome:n1,salario:s1,telefone:c1,pin:p1},
+    {nome:n2,salario:s2,telefone:c2,pin:p2}
+  ]})})
 
   const { usuarios } = await api('/status')
   USUARIOS_CACHE = usuarios || []
@@ -255,7 +275,9 @@ async function verificarPin() {
       return
     }
     fecharModal('modal-pin')
-    usuario = { ...res, id: Number(res.id) }
+    const { token, ...dados } = res
+    usuario = { ...dados, id: Number(dados.id) }
+    localStorage.setItem('fin_token', token)
     localStorage.setItem('fin_usuario', JSON.stringify(usuario))
     if (usuario.role === 'super_admin') {
       show('app')
@@ -266,12 +288,25 @@ async function verificarPin() {
   } catch(e) {
     pinAtual = ''
     atualizarPinDots()
-    alert('Erro de conexão. Tente novamente.')
+    if (e.status === 401) {
+      // PIN errado: chacoalha as bolinhas.
+      document.getElementById('pin-erro').style.display = 'block'
+      const dots = document.getElementById('pin-dots')
+      dots.classList.remove('shake')
+      void dots.offsetWidth
+      dots.classList.add('shake')
+    } else if (e.status === 429) {
+      alert(e.message)
+    } else {
+      alert('Erro de conexão. Tente novamente.')
+    }
   }
 }
 
-function sair() {
+async function sair() {
+  try { await api('/logout', { method: 'POST' }) } catch(e) {}
   localStorage.removeItem('fin_usuario')
+  localStorage.removeItem('fin_token')
   usuario = null
   location.reload()
 }
@@ -1419,7 +1454,7 @@ async function processarImagem() {
     const formData = new FormData()
     arquivosSelecionados.forEach(f => formData.append('arquivos', f))
 
-    const res = await fetch('/api/analisar-arquivo', { method: 'POST', body: formData })
+    const res = await fetch('/api/analisar-arquivo', { method: 'POST', body: formData, headers: comToken() })
     const data = await res.json()
     if (!res.ok) throw new Error(data.erro || 'Erro na análise')
 
@@ -1443,7 +1478,7 @@ async function processarCSV() {
     const formData = new FormData()
     formData.append('arquivo', csvSelecionado)
 
-    const res = await fetch('/api/importar-csv', { method: 'POST', body: formData })
+    const res = await fetch('/api/importar-csv', { method: 'POST', body: formData, headers: comToken() })
     const data = await res.json()
     if (!res.ok) throw new Error(data.erro || 'Erro ao processar CSV')
 
@@ -1894,6 +1929,7 @@ function abrirModalEmprestimo(emp = null) {
   document.getElementById('emp-juros').value = emp ? String(Number(emp.taxa_juros)).replace('.', ',') : ''
   document.getElementById('emp-vencimento').value = emp?.data_vencimento || ''
   document.getElementById('emp-pago').value = emp ? String(Number(emp.valor_pago)).replace('.', ',') : ''
+  document.getElementById('emp-folha').checked = !!Number(emp?.desconto_folha)
 
   // Selecionar o tipo correto
   document.querySelectorAll('.tipo-btn').forEach(b => {
@@ -1914,6 +1950,7 @@ async function salvarEmprestimo() {
   const dataVencimento = document.getElementById('emp-vencimento').value || null
   const valorPago = parseBRL(document.getElementById('emp-pago').value)
   const parcelasPagas = valorPago > 0 && parcelaMensal > 0 ? Math.floor(valorPago / parcelaMensal) : 0
+  const descontoFolha = document.getElementById('emp-folha').checked ? 1 : 0
 
   if (!descricao || !credor || !valorTotal) { toast('Preencha descrição, credor e valor total!', 'erro'); return }
 
@@ -1921,17 +1958,16 @@ async function salvarEmprestimo() {
     if (empEdicaoId) {
       await api(`/emprestimos/${empEdicaoId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas })
+        body: JSON.stringify({ tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, descontoFolha })
       })
       toast(`✅ "${descricao}" atualizado!`)
     } else {
-      await api('/emprestimos', {
+      const criado = await api('/emprestimos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuarioId: usuario.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento })
+        body: JSON.stringify({ usuarioId: usuario.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, descontoFolha })
       })
       if (valorPago > 0) {
-        const criado = await api('/emprestimos').then(list => list[0])
-        if (criado) await api(`/emprestimos/${criado.id}/pagar`, {
+        if (criado?.id) await api(`/emprestimos/${criado.id}/pagar`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ valorPago, parcelasPagas })
         })
@@ -1978,7 +2014,7 @@ async function renderEmprestimos() {
         <div class="emp-top">
           <div>
             <div class="emp-desc">${emoji} ${e.descricao}</div>
-            <div class="emp-credor">${label} · ${e.credor} · ${e.usuario_nome}</div>
+            <div class="emp-credor">${label} · ${e.credor} · ${e.usuario_nome}${Number(e.desconto_folha) ? ' · 🧾 em folha' : ''}</div>
           </div>
           <div class="emp-badge">Faltam ${fmt(restante)}</div>
         </div>
@@ -2043,13 +2079,50 @@ async function limparImportados() {
   }
 }
 
+// ── CÓPIA DE SEGURANÇA (administrador) ──
+async function baixarBackup() {
+  toast('⏳ Gerando cópia...')
+  try {
+    const r = await fetch('/api/backup', { headers: comToken() })
+    if (r.status === 401) return sessaoExpirada()
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).erro || 'HTTP ' + r.status)
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `financas-backup-${new Date().toLocaleDateString('sv-SE')}.db`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+    toast('✅ Cópia baixada!')
+  } catch (e) {
+    toast('❌ ' + e.message, 'erro')
+  }
+}
+
 // ── EXPORTAÇÃO ──
 function exportarCSV() {
   const now = new Date()
   const mes = now.getMonth() + 1
   const ano = now.getFullYear()
-  window.location.href = `/api/exportar/csv?mes=${mes}&ano=${ano}${famQAnd()}`
-  toast('📥 Download do CSV iniciado!')
+  // Baixa pelo fetch (com o token) e entrega o arquivo ao navegador.
+  fetch(`/api/exportar/csv?mes=${mes}&ano=${ano}${famQAnd()}`, { headers: comToken() })
+    .then(r => {
+      if (r.status === 401) { sessaoExpirada(); throw new Error('sessão expirada') }
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.blob()
+    })
+    .then(blob => {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `financas-${ano}-${String(mes).padStart(2, '0')}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+      toast('📥 CSV baixado!')
+    })
+    .catch(e => toast('❌ Não foi possível exportar: ' + e.message, 'erro'))
 }
 
 async function abrirRelatorioHTML() {

@@ -196,6 +196,15 @@ db.exec(`
     enviado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (usuario_id, chave, tipo)
   );
+
+  -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
+  -- por ninguém.
+  CREATE TABLE IF NOT EXISTS sessoes (
+    token_hash TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    usado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `)
 
 // Migrações seguras. Precisam rodar DEPOIS do CREATE TABLE: num banco novo, um ALTER
@@ -212,6 +221,8 @@ try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } 
 try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
 try { db.exec("ALTER TABLE receitas_programadas ADD COLUMN estimada INTEGER DEFAULT 0") } catch(e) {}
 try { db.exec("ALTER TABLE gastos_recorrentes ADD COLUMN cartao_id INTEGER") } catch(e) {}
+// Consignado: a parcela sai do salário antes de cair na conta, então não vira conta a pagar.
+try { db.exec("ALTER TABLE emprestimos ADD COLUMN desconto_folha INTEGER DEFAULT 0") } catch(e) {}
 
 // Seed: garante que a família principal existe e usuários legados ficam nela
 const famCount = db.prepare('SELECT COUNT(*) as n FROM familias').get()
@@ -519,9 +530,9 @@ function atualizarMeta(id, valorAtual) {
 }
 
 // ===== EMPRÉSTIMOS =====
-function criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento) {
-  return db.prepare(`INSERT INTO emprestimos (usuario_id, tipo, descricao, credor, valor_total, parcela_mensal, total_parcelas, taxa_juros, data_vencimento)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal || 0, totalParcelas || 1, taxaJuros || 0, dataVencimento || null)
+function criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, descontoFolha = 0) {
+  return db.prepare(`INSERT INTO emprestimos (usuario_id, tipo, descricao, credor, valor_total, parcela_mensal, total_parcelas, taxa_juros, data_vencimento, desconto_folha)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(usuarioId, tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal || 0, totalParcelas || 1, taxaJuros || 0, dataVencimento || null, descontoFolha ? 1 : 0)
 }
 function listarEmprestimos(familiaId = null, usuarioId = null) {
   if (usuarioId) return db.prepare("SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.usuario_id = ? AND e.status = 'ativo' ORDER BY e.criado_em DESC").all(usuarioId)
@@ -536,10 +547,11 @@ function atualizarEmprestimo(id, valorPago, parcelasPagas) {
   const status = novoValorPago >= Number(emp.valor_total) ? 'quitado' : 'ativo'
   return db.prepare('UPDATE emprestimos SET valor_pago=?, parcelas_pagas=?, status=? WHERE id=?').run(novoValorPago, novasParcelas, status, id)
 }
-function editarEmprestimo(id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas) {
+function editarEmprestimo(id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, descontoFolha) {
   const status = valorPago >= valorTotal ? 'quitado' : 'ativo'
-  return db.prepare('UPDATE emprestimos SET tipo=?, descricao=?, credor=?, valor_total=?, parcela_mensal=?, total_parcelas=?, taxa_juros=?, data_vencimento=?, valor_pago=?, parcelas_pagas=?, status=? WHERE id=?')
-    .run(tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, status, id)
+  // descontoFolha ausente (cliente antigo) mantém o valor gravado.
+  return db.prepare('UPDATE emprestimos SET tipo=?, descricao=?, credor=?, valor_total=?, parcela_mensal=?, total_parcelas=?, taxa_juros=?, data_vencimento=?, valor_pago=?, parcelas_pagas=?, status=?, desconto_folha=COALESCE(?, desconto_folha) WHERE id=?')
+    .run(tipo || 'emprestimo', descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, status, descontoFolha == null ? null : (descontoFolha ? 1 : 0), id)
 }
 function deletarEmprestimo(id) {
   return db.prepare('DELETE FROM emprestimos WHERE id = ?').run(id)
@@ -836,11 +848,12 @@ function itensCalendario(familiaId, usuarioId, m, a) {
 
   itens.push(..._faturasDoMes(familiaId, usuarioId, a, m, cartoes))
 
-  // Parcela de empréstimo/financiamento no dia do vencimento cadastrado.
+  // Parcela de empréstimo/financiamento no dia do vencimento cadastrado. Consignado
+  // (desconto em folha) fica de fora: a parcela já sai do salário, que entra líquido.
   const emprestimos = _porEscopo(
-    `SELECT e.* FROM emprestimos e WHERE e.usuario_id = ? AND e.status = 'ativo'`,
-    `SELECT e.* FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo'`,
-    `SELECT e.* FROM emprestimos e WHERE e.status = 'ativo'`,
+    `SELECT e.* FROM emprestimos e WHERE e.usuario_id = ? AND e.status = 'ativo' AND COALESCE(e.desconto_folha, 0) = 0`,
+    `SELECT e.* FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' AND COALESCE(e.desconto_folha, 0) = 0`,
+    `SELECT e.* FROM emprestimos e WHERE e.status = 'ativo' AND COALESCE(e.desconto_folha, 0) = 0`,
     usuarioId, familiaId)
   for (const e of emprestimos) {
     if (!(Number(e.parcela_mensal) > 0) || !e.data_vencimento) continue
@@ -1129,12 +1142,75 @@ function alertasVencimento(familiaId = null) {
   em7dias.setDate(hoje.getDate() + 7)
   const em7diasStr = em7dias.toISOString().split('T')[0]
   if (familiaId) {
-    return db.prepare(`SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' AND e.data_vencimento IS NOT NULL AND e.data_vencimento <= ? ORDER BY e.data_vencimento ASC`).all(familiaId, em7diasStr)
+    return db.prepare(`SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo' AND COALESCE(e.desconto_folha, 0) = 0 AND e.data_vencimento IS NOT NULL AND e.data_vencimento <= ? ORDER BY e.data_vencimento ASC`).all(familiaId, em7diasStr)
   }
   return db.prepare(`SELECT e.*, u.nome as usuario_nome FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE e.status = 'ativo' AND e.data_vencimento IS NOT NULL AND e.data_vencimento <= ? ORDER BY e.data_vencimento ASC`).all(em7diasStr)
 }
 
+// ===== SESSÕES E PERMISSÕES =====
+const _hashToken = t => require('crypto').createHash('sha256').update(String(t)).digest('hex')
+const SESSAO_DIAS = 90
+
+function criarSessao(usuarioId) {
+  const token = require('crypto').randomBytes(32).toString('hex')
+  db.prepare('INSERT INTO sessoes (token_hash, usuario_id) VALUES (?, ?)').run(_hashToken(token), usuarioId)
+  return token
+}
+// Devolve o usuário dono do token (sem o PIN), ou null se o token não existe ou expirou.
+// A validade é renovada a cada uso: quem usa o app pelo menos a cada 90 dias não precisa
+// digitar o PIN de novo.
+function usuarioDaSessao(token) {
+  if (!token) return null
+  const h = _hashToken(token)
+  const s = db.prepare(`SELECT usuario_id, usado_em FROM sessoes WHERE token_hash = ?
+    AND usado_em >= datetime('now', ?)`).get(h, `-${SESSAO_DIAS} days`)
+  if (!s) return null
+  db.prepare("UPDATE sessoes SET usado_em = CURRENT_TIMESTAMP WHERE token_hash = ? AND usado_em < datetime('now', '-1 hour')").run(h)
+  return semPin(obterUsuarioPorId(s.usuario_id))
+}
+function encerrarSessao(token) {
+  if (token) db.prepare('DELETE FROM sessoes WHERE token_hash = ?').run(_hashToken(token))
+}
+// Ao trocar o PIN, derruba as sessões abertas em outros aparelhos.
+function encerrarOutrasSessoes(usuarioId, tokenAtual) {
+  db.prepare('DELETE FROM sessoes WHERE usuario_id = ? AND token_hash != ?').run(usuarioId, _hashToken(tokenAtual || ''))
+}
+function semPin(u) {
+  if (!u) return u
+  const { pin, ...resto } = u
+  return resto
+}
+// Família dona de um registro, para impedir que alguém mexa no que é de outra família.
+// undefined = registro não existe; null = registro antigo sem dono (liberado).
+const _DONO = {
+  gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
+  receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
+  gastos_recorrentes: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+}
+function familiaDoRegistro(tabela, id) {
+  const tipo = _DONO[tabela]
+  if (!tipo) return undefined
+  if (tipo === 'id') return db.prepare('SELECT id AS f FROM familias WHERE id = ?').get(id)?.f
+  if (tipo === 'proprio' || tipo === 'familia') {
+    const r = db.prepare(`SELECT familia_id AS f FROM ${tabela} WHERE id = ?`).get(id)
+    return r ? r.f : undefined
+  }
+  const r = db.prepare(`SELECT t.usuario_id AS u, us.familia_id AS f FROM ${tabela} t
+    LEFT JOIN usuarios us ON us.id = t.usuario_id WHERE t.id = ?`).get(id)
+  if (!r) return undefined
+  return r.u == null ? null : r.f
+}
+
+// Cópia consistente do banco inteiro num arquivo temporário (funciona com o app rodando).
+function gerarBackup() {
+  const arq = path.join(require('os').tmpdir(), `financeiro-backup-${Date.now()}.db`)
+  db.exec(`VACUUM INTO '${arq.replace(/'/g, "''")}'`)
+  return arq
+}
+
 module.exports = {
+  gerarBackup,
+  criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,
   criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,
   criarConta, listarContas, atualizarSaldoConta, atualizarConta, deletarConta,

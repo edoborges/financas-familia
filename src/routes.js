@@ -4,6 +4,10 @@ const multer = require('multer')
 const db = require('./database')
 const { processarMensagem } = require('./processador')
 const { gerarPlanoEconomia, analisarArquivoFinanceiro } = require('./ai')
+const auth = require('./auth')
+
+// Tudo daqui para baixo exige login (exceto as rotas públicas listadas em auth.js).
+router.use(auth.exigirLogin)
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -62,7 +66,9 @@ function parseCSV(csvText) {
 router.post('/setup-admin', (req, res) => {
   try {
     const { nome, pin, senha } = req.body
-    if (senha !== (process.env.ADMIN_SECRET || 'financas2024admin')) {
+    // Sem ADMIN_SECRET configurado no servidor, a rota fica desligada (a senha padrão
+    // estava escrita no código, então não servia de proteção).
+    if (!process.env.ADMIN_SECRET || senha !== process.env.ADMIN_SECRET) {
       return res.status(403).json({ erro: 'Senha de configuração incorreta' })
     }
     if (!nome || !pin || !/^\d{4}$/.test(String(pin))) {
@@ -70,29 +76,56 @@ router.post('/setup-admin', (req, res) => {
     }
     const telefone = 'admin_' + nome.toLowerCase().replace(/\s+/g, '')
     db.criarUsuario(nome, telefone, 0, String(pin), 1, 'super_admin')
-    res.json(db.obterUsuario(telefone))
+    res.json(db.semPin(db.obterUsuario(telefone)))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
 })
 
+// Pública: alimenta a tela de login. Só o necessário para escolher quem vai entrar:
+// nada de PIN, e do telefone só os 4 últimos dígitos.
 router.get('/status', (req, res) => {
-  const usuarios = db.listarUsuarios()
+  const usuarios = db.listarUsuarios().map(u => ({
+    id: u.id, nome: u.nome, familia_id: u.familia_id, role: u.role,
+    telefone: /^\d{4,}$/.test(u.telefone || '') ? u.telefone.slice(-4) : ''
+  }))
   res.json({ configurado: usuarios.length > 0, usuarios })
 })
 
 router.get('/usuarios', (req, res) => {
   const { familiaId } = req.query
-  res.json(db.listarUsuarios(familiaId ? parseInt(familiaId) : null))
+  res.json(db.listarUsuarios(familiaId ? parseInt(familiaId) : null).map(db.semPin))
+})
+
+// Primeiro acesso: cria os dois usuários de uma vez. Só funciona com o banco vazio.
+router.post('/setup', (req, res) => {
+  try {
+    if (db.listarUsuarios().length > 0) return res.status(403).json({ erro: 'App já configurado' })
+    const lista = Array.isArray(req.body.usuarios) ? req.body.usuarios : []
+    if (!lista.length || lista.some(u => !u.nome || !/^\d{4}$/.test(String(u.pin)))) {
+      return res.status(400).json({ erro: 'Nome e PIN de 4 dígitos obrigatórios' })
+    }
+    for (const u of lista) {
+      const telefone = (u.telefone && String(u.telefone).trim()) ? String(u.telefone).replace(/\D/g, '') : u.nome.toLowerCase().replace(/\s+/g, '')
+      db.criarUsuario(u.nome, telefone, u.salario || 0, String(u.pin), 1, 'membro')
+    }
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 router.post('/usuarios', (req, res) => {
   try {
     const { nome, salario, telefone: tel, pin, familiaId, role } = req.body
     if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
+    // Membro comum só cria gente na própria família e não cria administrador.
+    const admin = req.usuario.role === 'super_admin'
+    const fam = admin ? (familiaId ? parseInt(familiaId) : 1) : req.usuario.familia_id
+    const papel = admin ? (role || 'membro') : 'membro'
     const telefone = (tel && tel.trim()) ? tel.trim().replace(/\D/g, '') : nome.toLowerCase().replace(/\s+/g, '')
-    db.criarUsuario(nome, telefone, salario || 0, pin || '0000', familiaId ? parseInt(familiaId) : 1, role || 'membro')
-    res.json(db.obterUsuario(telefone))
+    db.criarUsuario(nome, telefone, salario || 0, pin || '0000', fam, papel)
+    res.json(db.semPin(db.obterUsuario(telefone)))
   } catch (e) {
     console.error('POST /usuarios erro:', e.message)
     res.status(500).json({ erro: e.message })
@@ -101,7 +134,9 @@ router.post('/usuarios', (req, res) => {
 
 // ===== FAMÍLIAS =====
 router.get('/familias', (req, res) => {
-  res.json(db.listarFamilias())
+  const todas = db.listarFamilias()
+  if (req.usuario.role === 'super_admin') return res.json(todas)
+  res.json(todas.filter(f => Number(f.id) === Number(req.usuario.familia_id)))
 })
 
 router.post('/familias', (req, res) => {
@@ -124,9 +159,32 @@ router.put('/familias/:id', (req, res) => {
 router.post('/login', (req, res) => {
   const { usuarioId, pin } = req.body
   if (!usuarioId || !pin) return res.status(400).json({ erro: 'Dados incompletos' })
-  const usuario = db.autenticarUsuario(parseInt(usuarioId), String(pin))
-  if (!usuario) return res.status(401).json({ erro: 'PIN incorreto' })
-  res.json(usuario)
+  const id = parseInt(usuarioId)
+  const minutos = auth.loginBloqueado(id)
+  if (minutos) return res.status(429).json({ erro: `Muitas tentativas. Tente de novo em ${minutos} min.` })
+  const usuario = db.autenticarUsuario(id, String(pin))
+  if (!usuario) {
+    auth.registrarErroLogin(id)
+    return res.status(401).json({ erro: 'PIN incorreto' })
+  }
+  auth.limparErrosLogin(id)
+  res.json({ ...db.semPin(usuario), token: db.criarSessao(usuario.id) })
+})
+
+// Cópia de segurança do banco inteiro (todas as famílias): só o administrador.
+router.get('/backup', (req, res) => {
+  if (req.usuario.role !== 'super_admin') return res.status(403).json({ erro: 'Só o administrador pode baixar a cópia' })
+  try {
+    const arq = db.gerarBackup()
+    res.download(arq, `financas-backup-${db.hojeBR()}.db`, () => require('fs').unlink(arq, () => {}))
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
+router.post('/logout', (req, res) => {
+  db.encerrarSessao(req.token)
+  res.json({ ok: true })
 })
 
 router.put('/usuarios/:id/salario', (req, res) => {
@@ -146,7 +204,9 @@ router.put('/usuarios/:id', (req, res) => {
     return res.status(401).json({ erro: 'PIN atual incorreto' })
   }
   db.editarUsuario(parseInt(req.params.id), nome || u.nome, salario ?? u.salario, telefone || u.telefone, pin || u.pin)
-  res.json(db.obterUsuarioPorId(parseInt(req.params.id)))
+  // PIN trocado: quem estava logado com o PIN antigo em outro aparelho sai.
+  if (pin && String(pin) !== String(u.pin)) db.encerrarOutrasSessoes(u.id, req.token)
+  res.json(db.semPin(db.obterUsuarioPorId(parseInt(req.params.id))))
 })
 
 router.get('/alertas', (req, res) => {
@@ -305,9 +365,9 @@ router.get('/emprestimos', (req, res) => {
 
 router.post('/emprestimos', (req, res) => {
   try {
-    const { usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento } = req.body
+    const { usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, descontoFolha } = req.body
     if (!usuarioId || !descricao || !credor || !valorTotal) return res.status(400).json({ erro: 'Dados incompletos' })
-    const result = db.criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento)
+    const result = db.criarEmprestimo(usuarioId, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, descontoFolha)
     res.json({ id: Number(result.lastInsertRowid) })
   } catch (e) {
     console.error('POST /emprestimos erro:', e.message)
@@ -316,8 +376,8 @@ router.post('/emprestimos', (req, res) => {
 })
 
 router.put('/emprestimos/:id', (req, res) => {
-  const { tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas } = req.body
-  db.editarEmprestimo(req.params.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas)
+  const { tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, descontoFolha } = req.body
+  db.editarEmprestimo(req.params.id, tipo, descricao, credor, valorTotal, parcelaMensal, totalParcelas, taxaJuros, dataVencimento, valorPago, parcelasPagas, descontoFolha)
   res.json({ ok: true })
 })
 

@@ -131,6 +131,7 @@
     </div>
     <div id="admin-familias-lista" class="admin-familias-lista"></div>
     <button class="btn-nova-familia" onclick="criarNovaFamilia()">+ Nova família</button>
+    <button class="btn-nova-familia" onclick="baixarBackup()">⬇️ Baixar cópia de segurança</button>
   </div>
 
   <!-- CONTEÚDO -->
@@ -496,6 +497,13 @@
     <input id="emp-vencimento" type="date" />
     <label class="input-label">Já paguei (R$)</label>
     <div class="input-prefix"><span>R$</span><input id="emp-pago" type="text" inputmode="decimal" placeholder="0,00" /></div>
+    <label class="rf-estimada">
+      <input id="emp-folha" type="checkbox" />
+      <span>
+        <b>Descontado em folha</b> (consignado)
+        <small>A parcela sai do salário antes de cair na conta: conta como dívida, mas não aparece em Contas a pagar nem na Agenda.</small>
+      </span>
+    </label>
     <div class="modal-btns">
       <button class="btn-cancel" id="emp-btn-excluir" style="display:none" onclick="deletarEmprestimoAtual()">🗑 Excluir</button>
       <button class="btn-cancel" onclick="fecharModal('modal-emprestimo')">Cancelar</button>
