@@ -78,7 +78,7 @@ const COR_CAT = {
   'Alimentação':'#f97316','Mercado':'#84cc16','Saúde':'#ef4444','Farmácia':'#f43f5e',
   'Transporte':'#3b82f6','Combustível':'#0ea5e9','Educação':'#8b5cf6','Lazer':'#ec4899',
   'Vestuário':'#d946ef','Casa':'#a16207','Financiamento':'#64748b','Assinatura':'#6366f1',
-  'Restaurante':'#f59e0b','Outros':'#94a3b8'
+  'Restaurante':'#f59e0b','Outros':'#94a3b8','Fatura':'#475569'
 }
 const corCat = c => COR_CAT[c] || '#94a3b8'
 const fmt =v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
@@ -1596,10 +1596,10 @@ async function carregarListaRendas() {
       <div class="renda-item${ehMeu ? '' : ' renda-outro'}">
         <div class="renda-item-top">
           <span class="renda-item-desc">${r.descricao}</span>
-          <span class="renda-item-val">${fmt(r.valor)}</span>
+          <span class="renda-item-val">${r.estimada ? '≈ ' : ''}${fmt(r.valor)}</span>
         </div>
         <div class="renda-item-bot">
-          <span class="renda-item-tipo">${tipo_label}</span>
+          <span class="renda-item-tipo">${tipo_label}${r.estimada ? ' · <span class="tag-estimada">estimativa</span>' : ''}</span>
           ${r.usuario_nome ? `<span class="renda-item-user">👤 ${r.usuario_nome}</span>` : ''}
         </div>
         ${r.observacao ? `<div class="renda-item-obs">📝 ${r.observacao}</div>` : ''}
@@ -1620,6 +1620,7 @@ function abrirFormRenda() {
   document.getElementById('rf-obs').value = ''
   document.getElementById('rf-dia-mes').value = ''
   document.getElementById('rf-dia-semana').value = '5'
+  document.getElementById('rf-estimada').checked = false
   document.getElementById('renda-form-titulo').textContent = 'Nova renda'
   rendaTipoSel = 'mensal'
   document.querySelectorAll('#renda-form .rtipo-btn').forEach((b,i) => b.classList.toggle('sel', i===0))
@@ -1648,6 +1649,7 @@ function editarRenda(r) {
   document.getElementById('rf-obs').value = r.observacao || ''
   document.getElementById('rf-dia-mes').value = r.dia_mes || ''
   document.getElementById('rf-dia-semana').value = r.dia_semana ?? 5
+  document.getElementById('rf-estimada').checked = !!r.estimada
   document.getElementById('renda-form-titulo').textContent = 'Editar renda'
   rendaTipoSel = r.tipo || 'mensal'
   const btns = document.querySelectorAll('#renda-form .rtipo-btn')
@@ -1669,7 +1671,8 @@ async function salvarRenda() {
 
   if (!descricao || !valor) { toast('⚠️ Preencha descrição e valor', 'aviso'); return }
 
-  const body = { usuarioId: usuario.id, descricao, valor, tipo: rendaTipoSel, diaMes, diaSemana, observacao: obs }
+  const estimada = document.getElementById('rf-estimada').checked
+  const body = { usuarioId: usuario.id, descricao, valor, tipo: rendaTipoSel, diaMes, diaSemana, observacao: obs, estimada }
 
   try {
     if (id) {
@@ -2529,7 +2532,7 @@ async function carregarListaRecorrentes() {
           <span class="renda-item-val">${fmt(r.valor)}</span>
         </div>
         <div class="renda-item-bot">
-          <span class="renda-item-tipo">${diaLabel} · ${r.categoria}</span>
+          <span class="renda-item-tipo">${diaLabel} · ${r.categoria}${r.cartao_nome ? ` · 💳 ${r.cartao_nome}` : ''}</span>
           ${r.usuario_nome ? `<span class="renda-item-user">👤 ${r.usuario_nome}</span>` : ''}
         </div>
         <div class="renda-item-acoes">
@@ -2554,6 +2557,7 @@ function abrirFormRecorrente() {
   document.getElementById('rec-forma-val').value = 'debito'
   document.getElementById('rec-form-titulo').textContent = 'Novo gasto recorrente'
   document.querySelectorAll('#recorrente-form .forma-btn').forEach((b, i) => b.classList.toggle('sel', i === 0))
+  mostrarCampoCartaoRec(null)
   document.getElementById('recorrente-form').style.display = 'block'
 }
 
@@ -2561,11 +2565,28 @@ function fecharFormRecorrente() {
   document.getElementById('recorrente-form').style.display = 'none'
 }
 
+// Só os cartões do próprio usuário: o gasto fixo é dele.
+async function mostrarCampoCartaoRec(cartaoSel) {
+  const campo = document.getElementById('rec-campo-cartao')
+  if (recFormaAtual !== 'credito') { campo.style.display = 'none'; return }
+  campo.style.display = ''
+  const sel = document.getElementById('rec-cartao')
+  try {
+    const cartoes = await api(`/cartoes?usuarioId=${usuario.id}`)
+    sel.innerHTML = '<option value="">Sem cartão definido (fica no dia do gasto)</option>' +
+      cartoes.map(c => `<option value="${c.id}">💳 ${c.nome} · fecha ${c.dia_fechamento}, vence ${c.dia_vencimento}</option>`).join('')
+    sel.value = cartaoSel ? String(cartaoSel) : (cartoes.length === 1 ? String(cartoes[0].id) : '')
+  } catch(e) {
+    sel.innerHTML = '<option value="">Não foi possível carregar os cartões</option>'
+  }
+}
+
 function selRecForma(btn, forma) {
   document.querySelectorAll('#recorrente-form .forma-btn').forEach(b => b.classList.remove('sel'))
   btn.classList.add('sel')
   recFormaAtual = forma
   document.getElementById('rec-forma-val').value = forma
+  mostrarCampoCartaoRec(null)
 }
 
 function editarRecorrente(r) {
@@ -2581,6 +2602,7 @@ function editarRecorrente(r) {
     b.classList.toggle('sel', b.getAttribute('onclick').includes(`'${recFormaAtual}'`))
   })
   document.getElementById('rec-form-titulo').textContent = 'Editar gasto recorrente'
+  mostrarCampoCartaoRec(r.cartao_id)
   document.getElementById('recorrente-form').style.display = 'block'
 }
 
@@ -2590,20 +2612,21 @@ async function salvarRecorrente() {
   const categoria = document.getElementById('rec-categoria').value
   const forma = recFormaAtual
   const dia = parseInt(document.getElementById('rec-dia').value) || 1
+  const cartaoId = forma === 'credito' ? (parseInt(document.getElementById('rec-cartao').value) || null) : null
   if (!desc || !valor || valor <= 0) { toast('Preencha descrição e valor!', 'erro'); return }
   try {
     if (recEdicaoId) {
       await api(`/recorrentes/${recEdicaoId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, ativa: 1 })
+        body: JSON.stringify({ descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, ativa: 1, cartaoId })
       })
       toast(`✅ "${desc}" atualizado!`)
     } else {
       await api('/recorrentes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuarioId: usuario.id, descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia })
+        body: JSON.stringify({ usuarioId: usuario.id, descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, cartaoId })
       })
       toast(`✅ "${desc}" adicionado! Será lançado todo dia ${dia}.`)
     }
@@ -2849,12 +2872,14 @@ function renderCalendario() {
     if (d.saldo != null && d.saldo < 0) classes.push('cal-negativo')
     if (d.data < c.hoje) classes.push('cal-passado')
 
-    // Até 4 pontos: entrada em verde, saídas na cor da categoria; previsto vira contorno.
-    const pontos = d.itens.slice(0, 4).map(i => {
+    // Até 4 pontos: entrada em verde, saídas na cor da categoria; previsto vira contorno;
+    // compra no cartão fica apagada, porque o dinheiro só sai na fatura.
+    const pontos = d.itens.slice().sort((x, y) => !!x.informativo - !!y.informativo).slice(0, 4).map(i => {
       const cor = i.tipo === 'entrada' ? '#10b981' : corCat(i.categoria)
+      const apagado = i.informativo ? ' cal-dot-info' : ''
       return i.previsto
-        ? `<i class="cal-dot cal-dot-prev" style="border-color:${cor}"></i>`
-        : `<i class="cal-dot" style="background:${cor}"></i>`
+        ? `<i class="cal-dot cal-dot-prev${apagado}" style="border-color:${cor}"></i>`
+        : `<i class="cal-dot${apagado}" style="background:${cor}"></i>`
     }).join('')
     const mais = d.itens.length > 4 ? `<i class="cal-mais">+${d.itens.length - 4}</i>` : ''
 
@@ -2913,23 +2938,43 @@ function renderDiaDetalhe() {
   const [a, m, dia] = d.data.split('-')
   const semana = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'][new Date(+a, +m - 1, +dia).getDay()]
 
+  const ddmm = data => data.slice(8, 10) + '/' + data.slice(5, 7)
+  // Ordem: entradas, saídas que mexem no saldo, e por último as compras no cartão.
+  const peso = i => i.tipo === 'entrada' ? 0 : i.informativo ? 2 : 1
   const itens = d.itens.length
     ? d.itens
         .slice()
-        .sort((x, y) => (x.tipo === y.tipo ? y.valor - x.valor : x.tipo === 'entrada' ? -1 : 1))
+        .sort((x, y) => peso(x) - peso(y) || y.valor - x.valor)
         .map(i => {
           const entrada = i.tipo === 'entrada'
-          const icone = entrada ? (i.categoria === 'atendimento' ? '🩺' : '💰') : (EMOJI_CAT[i.categoria] || '📦')
+          const icone = entrada
+            ? (i.categoria === 'atendimento' ? '🩺' : i.categoria === 'salario' ? '💼' : '💰')
+            : i.fonte === 'fatura' ? '💳' : (EMOJI_CAT[i.categoria] || '📦')
           const cor = entrada ? '#10b981' : corCat(i.categoria)
-          const fonte = { recorrente: 'fixa', emprestimo: 'parcela', programada: 'renda fixa' }[i.fonte]
-          return `<div class="cal-item" style="border-left-color:${cor}">
+          const fonte = { recorrente: 'fixa', emprestimo: 'parcela', programada: 'renda fixa', estimada: '<span class="tag-estimada">estimativa</span>' }[i.fonte]
+          let meta = `${entrada ? 'Entrada' : i.categoria}${fonte ? ' · ' + fonte : ''}`
+          if (i.informativo) meta += ` · 💳 ${i.cartao}, sai na fatura de ${ddmm(i.vencimentoFatura)}`
+          if (i.fonte === 'fatura') meta = `${i.compras.length} ${i.compras.length === 1 ? 'compra' : 'compras'}`
+          if (i.previsto) meta += ' · <span class="cal-tag-prev">previsto</span>'
+
+          const corValor = entrada ? '#10b981' : i.informativo ? '#94a3b8' : '#e11d48'
+          const linha = `<div class="cal-item${i.informativo ? ' cal-item-info-cartao' : ''}" style="border-left-color:${cor}">
             <span class="cal-item-ico">${icone}</span>
             <div class="cal-item-info">
               <div class="cal-item-desc">${i.descricao}</div>
-              <div class="cal-item-meta">${entrada ? 'Entrada' : i.categoria}${fonte ? ' · ' + fonte : ''}${i.previsto ? ' · <span class="cal-tag-prev">previsto</span>' : ''}</div>
+              <div class="cal-item-meta">${meta}</div>
             </div>
-            <b class="cal-item-val" style="color:${entrada ? '#10b981' : '#e11d48'}">${entrada ? '+' : '−'}${fmt(i.valor)}</b>
+            <b class="cal-item-val" style="color:${corValor}">${entrada ? '+' : '−'}${fmt(i.valor)}</b>
           </div>`
+
+          if (i.fonte !== 'fatura') return linha
+          // A fatura abre para mostrar de quais compras ela é feita.
+          return `<details class="cal-fatura">
+            <summary>${linha}</summary>
+            <div class="cal-fatura-compras">
+              ${i.compras.map(c => `<div><span>${ddmm(c.data)} · ${c.descricao}</span><b>${fmt(c.valor)}</b></div>`).join('')}
+            </div>
+          </details>`
         }).join('')
     : `<div class="orc-vazio">Nenhum movimento neste dia</div>`
 

@@ -178,6 +178,8 @@ try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } 
 try { db.exec("ALTER TABLE receitas ADD COLUMN tipo TEXT DEFAULT 'outro'") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
+try { db.exec("ALTER TABLE receitas_programadas ADD COLUMN estimada INTEGER DEFAULT 0") } catch(e) {}
+try { db.exec("ALTER TABLE gastos_recorrentes ADD COLUMN cartao_id INTEGER") } catch(e) {}
 
 // Seed: garante que a família principal existe e usuários legados ficam nela
 const famCount = db.prepare('SELECT COUNT(*) as n FROM familias').get()
@@ -403,7 +405,10 @@ function contarDiasSemanaMes(ano, mes, diaSemana) {
   return count
 }
 
-function calcularRendaMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
+// Rendas programadas que valem para o mês. Uma estimativa (salário que só se sabe no dia)
+// sai da conta assim que o dono lança uma receita do tipo 'salario' naquele mês: a partir
+// daí vale o valor real, e as duas nunca somam juntas.
+function programadasDoMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
   const now = new Date()
   const m = mes || (now.getMonth() + 1)
   const a = ano || now.getFullYear()
@@ -415,19 +420,23 @@ function calcularRendaMes(familiaId = null, usuarioId = null, mes = null, ano = 
   } else {
     programadas = db.prepare('SELECT * FROM receitas_programadas WHERE ativa = 1').all()
   }
-  let total = 0
-  for (const rp of programadas) {
-    const v = Number(rp.valor)
-    if (rp.tipo === 'mensal') {
-      total += v
-    } else if (rp.tipo === 'semanal') {
-      const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
-      total += v * contarDiasSemanaMes(a, m, ds)
-    } else if (rp.tipo === 'quinzenal') {
-      total += v * 2
-    }
-  }
-  return total
+  const mesStr = `${a}-${String(m).padStart(2, '0')}`
+  const salarioLancado = db.prepare(`SELECT 1 FROM receitas WHERE usuario_id = ? AND tipo = 'salario' AND strftime('%Y-%m', data_receita) = ? LIMIT 1`)
+  return programadas.filter(rp => !(rp.estimada && salarioLancado.get(rp.usuario_id, mesStr)))
+}
+
+function valorProgramadaNoMes(rp, mes, ano) {
+  const v = Number(rp.valor)
+  if (rp.tipo === 'semanal') return v * contarDiasSemanaMes(ano, mes, rp.dia_semana != null ? Number(rp.dia_semana) : 1)
+  if (rp.tipo === 'quinzenal') return v * 2
+  return v
+}
+
+function calcularRendaMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const now = new Date()
+  const m = mes || (now.getMonth() + 1)
+  const a = ano || now.getFullYear()
+  return programadasDoMes(familiaId, usuarioId, m, a).reduce((acc, rp) => acc + valorProgramadaNoMes(rp, m, a), 0)
 }
 
 function listarReceitasProgramadas(familiaId = null, usuarioId = null) {
@@ -435,11 +444,11 @@ function listarReceitasProgramadas(familiaId = null, usuarioId = null) {
   if (familiaId) return db.prepare('SELECT rp.*, u.nome as usuario_nome FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? ORDER BY u.nome, rp.dia_mes ASC').all(familiaId)
   return db.prepare('SELECT rp.*, u.nome as usuario_nome FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id ORDER BY rp.criado_em').all()
 }
-function adicionarReceitaProgramada(usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao) {
-  return db.prepare('INSERT INTO receitas_programadas (usuario_id, descricao, valor, tipo, dia_mes, dia_semana, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, tipo || 'mensal', diaMes || null, diaSemana != null ? diaSemana : null, observacao || null)
+function adicionarReceitaProgramada(usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao, estimada = 0) {
+  return db.prepare('INSERT INTO receitas_programadas (usuario_id, descricao, valor, tipo, dia_mes, dia_semana, observacao, estimada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, tipo || 'mensal', diaMes || null, diaSemana != null ? diaSemana : null, observacao || null, estimada ? 1 : 0)
 }
-function atualizarReceitaProgramada(id, descricao, valor, tipo, diaMes, diaSemana, observacao, ativa) {
-  return db.prepare('UPDATE receitas_programadas SET descricao=?, valor=?, tipo=?, dia_mes=?, dia_semana=?, observacao=?, ativa=? WHERE id=?').run(descricao, valor, tipo, diaMes || null, diaSemana != null ? diaSemana : null, observacao || null, ativa ?? 1, id)
+function atualizarReceitaProgramada(id, descricao, valor, tipo, diaMes, diaSemana, observacao, ativa, estimada = 0) {
+  return db.prepare('UPDATE receitas_programadas SET descricao=?, valor=?, tipo=?, dia_mes=?, dia_semana=?, observacao=?, ativa=?, estimada=? WHERE id=?').run(descricao, valor, tipo, diaMes || null, diaSemana != null ? diaSemana : null, observacao || null, ativa ?? 1, estimada ? 1 : 0, id)
 }
 function removerReceitaProgramada(id) {
   return db.prepare('DELETE FROM receitas_programadas WHERE id = ?').run(id)
@@ -532,25 +541,11 @@ function rendaProgramadaDetalhe(familiaId = null, usuarioId = null, mes = null, 
   const now = new Date()
   const m = mes || (now.getMonth() + 1)
   const a = ano || now.getFullYear()
-  let programadas
-  if (usuarioId) {
-    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE usuario_id = ? AND ativa = 1').all(usuarioId)
-  } else if (familiaId) {
-    programadas = db.prepare('SELECT rp.* FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? AND rp.ativa = 1').all(familiaId)
-  } else {
-    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE ativa = 1').all()
-  }
   let fixa = 0, semanal = 0
-  for (const rp of programadas) {
-    const v = Number(rp.valor)
-    if (rp.tipo === 'semanal') {
-      const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
-      semanal += v * contarDiasSemanaMes(a, m, ds)
-    } else if (rp.tipo === 'quinzenal') {
-      fixa += v * 2
-    } else {
-      fixa += v
-    }
+  for (const rp of programadasDoMes(familiaId, usuarioId, m, a)) {
+    const v = valorProgramadaNoMes(rp, m, a)
+    if (rp.tipo === 'semanal') semanal += v
+    else fixa += v
   }
   return { fixa, semanal, total: fixa + semanal }
 }
@@ -590,8 +585,11 @@ function calcularMetaRenda(familiaId = null, usuarioId = null, mes = null, ano =
   const grupos = receitasAgrupadasPorTipo(familiaId, usuarioId, mesStr)
   const at = grupos.find(g => g.tipo === 'atendimento') || { qtd: 0, total: 0 }
   const atendimentos = { qtd: Number(at.qtd), total: Number(at.total) }
+  // Salário lançado entra como renda fixa: é ele que substitui a estimativa programada.
+  const salarioLancado = grupos.filter(g => g.tipo === 'salario').reduce((acc, g) => acc + Number(g.total), 0)
+  prog.fixa += salarioLancado
   const outras = grupos
-    .filter(g => g.tipo !== 'atendimento')
+    .filter(g => g.tipo !== 'atendimento' && g.tipo !== 'salario')
     .reduce((acc, g) => acc + Number(g.total), 0)
 
   // Ticket: o informado manualmente vence; senão a média real do histórico.
@@ -647,33 +645,104 @@ function _porEscopo(sqlUsuario, sqlFamilia, sqlTodos, usuarioId, familiaId, ...p
   return db.prepare(sqlTodos).all(...params)
 }
 
-// Todas as entradas e saídas de um mês, realizadas e previstas, cada uma com sua data.
-function itensCalendario(familiaId, usuarioId, m, a) {
-  const mesStr = `${a}-${String(m).padStart(2, '0')}`
-  const ultimoDia = new Date(a, m, 0).getDate()
-  const dataDoDia = d => `${mesStr}-${String(Math.min(Math.max(1, d), ultimoDia)).padStart(2, '0')}`
-  const itens = []
+const _mesStr = (y, m) => `${y}-${String(m).padStart(2, '0')}`
+const _somaMes = (y, m, k) => { const t = y * 12 + (m - 1) + k; return [Math.floor(t / 12), (t % 12) + 1] }
 
-  const gastos = _porEscopo(
+// Dia em que vence a fatura de uma compra no cartão. Compra no dia do fechamento ou
+// depois cai na fatura seguinte (o "melhor dia de compra" é o próprio fechamento).
+// Se o vencimento é um dia menor que o fechamento, ele cai no mês seguinte ao fechamento.
+function vencimentoFatura(dataCompra, diaFechamento, diaVencimento) {
+  const fech = Number(diaFechamento) || 1
+  const venc = Number(diaVencimento) || 10
+  const [y, m, d] = String(dataCompra).slice(0, 10).split('-').map(Number)
+  const [cy, cm] = d >= fech ? _somaMes(y, m, 1) : [y, m]
+  const [vy, vm] = venc <= fech ? _somaMes(cy, cm, 1) : [cy, cm]
+  const ultimo = new Date(vy, vm, 0).getDate()
+  return `${_mesStr(vy, vm)}-${String(Math.min(venc, ultimo)).padStart(2, '0')}`
+}
+
+function _gastosDoMes(familiaId, usuarioId, mesStr) {
+  return _porEscopo(
     `SELECT g.* FROM gastos g WHERE g.usuario_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`,
     `SELECT g.* FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`,
     `SELECT g.* FROM gastos g WHERE strftime('%Y-%m', g.data_gasto) = ?`,
     usuarioId, familiaId, mesStr)
-  for (const g of gastos) {
-    itens.push({ data: String(g.data_gasto).slice(0, 10), tipo: 'saida', descricao: g.descricao, valor: Number(g.valor), categoria: g.categoria || 'Outros', fonte: g.origem === 'recorrente' ? 'recorrente' : 'gasto' })
-  }
+}
 
-  // Recorrentes ainda não lançados neste mês entram como previsão no dia do vencimento.
-  const lancados = new Set(gastos.filter(g => g.recorrente_id).map(g => g.recorrente_id))
-  const recorrentes = _porEscopo(
+function _recorrentesAtivos(familiaId, usuarioId) {
+  return _porEscopo(
     `SELECT gr.* FROM gastos_recorrentes gr WHERE gr.usuario_id = ? AND gr.ativa = 1`,
     `SELECT gr.* FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE u.familia_id = ? AND gr.ativa = 1`,
     `SELECT gr.* FROM gastos_recorrentes gr WHERE gr.ativa = 1`,
     usuarioId, familiaId)
-  for (const r of recorrentes) {
-    if (lancados.has(r.id)) continue
-    itens.push({ data: dataDoDia(r.dia_mes || 1), tipo: 'saida', descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria || 'Outros', fonte: 'recorrente' })
+}
+
+// Gastos fixos ainda não lançados no mês viram previsão — mas só do mês atual em diante:
+// num mês passado, o que não foi lançado não foi cobrado.
+function _recorrentesPendentes(familiaId, usuarioId, y, m, gastosDoMes) {
+  const now = new Date()
+  if (y * 12 + m < now.getFullYear() * 12 + now.getMonth() + 1) return []
+  const lancados = new Set(gastosDoMes.filter(g => g.recorrente_id).map(g => g.recorrente_id))
+  const ultimo = new Date(y, m, 0).getDate()
+  return _recorrentesAtivos(familiaId, usuarioId)
+    .filter(r => !lancados.has(r.id))
+    .map(r => ({ ...r, data: `${_mesStr(y, m)}-${String(Math.min(r.dia_mes || 1, ultimo)).padStart(2, '0')}` }))
+}
+
+// Faturas que vencem no mês: juntam as compras no cartão dos três meses que podem cair nele.
+function _faturasDoMes(familiaId, usuarioId, y, m, cartoes) {
+  const alvo = _mesStr(y, m)
+  const grupos = new Map()
+  for (const k of [-2, -1, 0]) {
+    const [cy, cm] = _somaMes(y, m, k)
+    const gastos = _gastosDoMes(familiaId, usuarioId, _mesStr(cy, cm))
+    const compras = [
+      ...gastos.filter(g => g.cartao_id).map(g => ({ cartao_id: g.cartao_id, data: String(g.data_gasto).slice(0, 10), descricao: g.descricao, valor: Number(g.valor) })),
+      ..._recorrentesPendentes(familiaId, usuarioId, cy, cm, gastos).filter(r => r.cartao_id).map(r => ({ cartao_id: r.cartao_id, data: r.data, descricao: r.descricao, valor: Number(r.valor) }))
+    ]
+    for (const c of compras) {
+      const cartao = cartoes.get(c.cartao_id)
+      if (!cartao) continue
+      const venc = vencimentoFatura(c.data, cartao.dia_fechamento, cartao.dia_vencimento)
+      if (venc.slice(0, 7) !== alvo) continue
+      const chave = `${c.cartao_id}|${venc}`
+      if (!grupos.has(chave)) grupos.set(chave, { data: venc, cartao, compras: [] })
+      grupos.get(chave).compras.push({ data: c.data, descricao: c.descricao, valor: c.valor })
+    }
   }
+  return [...grupos.values()].map(f => ({
+    data: f.data, tipo: 'saida', descricao: `Fatura ${f.cartao.nome}`,
+    valor: +f.compras.reduce((acc, c) => acc + c.valor, 0).toFixed(2),
+    categoria: 'Fatura', fonte: 'fatura',
+    compras: f.compras.sort((a, b) => a.data.localeCompare(b.data))
+  }))
+}
+
+// Todas as entradas e saídas de um mês, realizadas e previstas, cada uma com sua data.
+// Compra no cartão aparece no dia da compra só como informação (informativo: true);
+// o dinheiro sai de verdade no vencimento da fatura.
+function itensCalendario(familiaId, usuarioId, m, a) {
+  const mesStr = _mesStr(a, m)
+  const ultimoDia = new Date(a, m, 0).getDate()
+  const dataDoDia = d => `${mesStr}-${String(Math.min(Math.max(1, d), ultimoDia)).padStart(2, '0')}`
+  const itens = []
+  const cartoes = new Map(db.prepare('SELECT * FROM cartoes').all().map(c => [c.id, c]))
+  const infoCartao = (cartaoId, data) => {
+    const c = cartoes.get(cartaoId)
+    return c ? { informativo: true, cartao: c.nome, vencimentoFatura: vencimentoFatura(data, c.dia_fechamento, c.dia_vencimento) } : {}
+  }
+
+  const gastos = _gastosDoMes(familiaId, usuarioId, mesStr)
+  for (const g of gastos) {
+    const data = String(g.data_gasto).slice(0, 10)
+    itens.push({ data, tipo: 'saida', descricao: g.descricao, valor: Number(g.valor), categoria: g.categoria || 'Outros', fonte: g.origem === 'recorrente' ? 'recorrente' : 'gasto', ...(g.cartao_id ? infoCartao(g.cartao_id, data) : {}) })
+  }
+
+  for (const r of _recorrentesPendentes(familiaId, usuarioId, a, m, gastos)) {
+    itens.push({ data: r.data, tipo: 'saida', descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria || 'Outros', fonte: 'recorrente', ...(r.cartao_id ? infoCartao(r.cartao_id, r.data) : {}) })
+  }
+
+  itens.push(..._faturasDoMes(familiaId, usuarioId, a, m, cartoes))
 
   // Parcela de empréstimo/financiamento no dia do vencimento cadastrado.
   const emprestimos = _porEscopo(
@@ -696,13 +765,8 @@ function itensCalendario(familiaId, usuarioId, m, a) {
     itens.push({ data: String(r.data_receita).slice(0, 10), tipo: 'entrada', descricao: r.descricao, valor: Number(r.valor), categoria: r.tipo || 'outro', fonte: 'receita' })
   }
 
-  const programadas = _porEscopo(
-    `SELECT rp.* FROM receitas_programadas rp WHERE rp.usuario_id = ? AND rp.ativa = 1`,
-    `SELECT rp.* FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? AND rp.ativa = 1`,
-    `SELECT rp.* FROM receitas_programadas rp WHERE rp.ativa = 1`,
-    usuarioId, familiaId)
-  for (const rp of programadas) {
-    const base = { tipo: 'entrada', descricao: rp.descricao, valor: Number(rp.valor), categoria: 'programada', fonte: 'programada' }
+  for (const rp of programadasDoMes(familiaId, usuarioId, m, a)) {
+    const base = { tipo: 'entrada', descricao: rp.descricao, valor: Number(rp.valor), categoria: 'programada', fonte: rp.estimada ? 'estimada' : 'programada' }
     if (rp.tipo === 'semanal') {
       const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
       for (let d = 1; d <= ultimoDia; d++) {
@@ -730,8 +794,10 @@ function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = nul
   const idx = (y, mm) => y * 12 + (mm - 1)
   const distancia = idx(a, m) - idx(now.getFullYear(), now.getMonth() + 1)
 
+  // Informativo (compra no cartão) nunca mexe em saldo nem em total: quem mexe é a fatura.
+  const conta = i => !i.informativo
   const fluxoFuturo = (y, mm) => itensCalendario(familiaId, usuarioId, mm, y)
-    .filter(i => i.data > hojeStr)
+    .filter(i => conta(i) && i.data > hojeStr)
     .reduce((acc, i) => acc + (i.tipo === 'entrada' ? i.valor : -i.valor), 0)
 
   // Saldo de abertura: hoje para o mês corrente; projeção encadeada para até 6 meses à frente.
@@ -755,8 +821,8 @@ function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = nul
   for (let d = 1; d <= ultimoDia; d++) {
     const data = `${mesStr}-${String(d).padStart(2, '0')}`
     const doDia = itens.filter(i => i.data === data)
-    const entradas = doDia.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
-    const saidas = doDia.filter(i => i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+    const entradas = doDia.filter(i => conta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+    const saidas = doDia.filter(i => conta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
     let saldoDia = null
     if (saldo != null && data >= hojeStr) {
       if (data > hojeStr) saldo += entradas - saidas
@@ -766,8 +832,8 @@ function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = nul
     dias.push({ dia: d, data, entradas, saidas, saldo: saldoDia, itens: doDia })
   }
 
-  const totalEntradas = itens.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
-  const totalSaidas = itens.filter(i => i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+  const totalEntradas = itens.filter(i => conta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+  const totalSaidas = itens.filter(i => conta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
   return {
     mes: m, ano: a, hoje: hojeStr,
     primeiroDiaSemana: new Date(a, m - 1, 1).getDay(),
@@ -782,11 +848,15 @@ function resumoFinanceiro(familiaId = null, usuarioId = null) {
   const usuarios = usuarioId ? todosUsuarios.filter(u => u.id === Number(usuarioId)) : todosUsuarios
   const salarioTotal = usuarios.reduce((acc, u) => acc + (u.salario || 0), 0)
 
-  // Renda calculada das receitas programadas (prefere programadas; cai back no salario se não tiver)
+  // Renda calculada das receitas programadas; cai no campo salario só se não houver nenhuma
+  // cadastrada. Testar o total > 0 não serve: quando a estimativa de salário sai da conta
+  // (salário real lançado), o total pode zerar e o salário seria somado duas vezes.
   const rendaProgramada = calcularRendaMes(familiaId, usuarioId)
   const { total: gastosMes } = totalGastosMes(familiaId, usuarioId)
   const { total: receitasExtras } = totalReceitasMes(familiaId, usuarioId)
-  const rendaBase = rendaProgramada > 0 ? rendaProgramada : salarioTotal
+  const receitasProgramadas = listarReceitasProgramadas(familiaId, usuarioId)
+  const temProgramadas = receitasProgramadas.some(r => r.ativa)
+  const rendaBase = temProgramadas ? rendaProgramada : salarioTotal
   const rendaTotal = rendaBase + Number(receitasExtras || 0)
 
   const cartoes = listarCartoes(familiaId, usuarioId)
@@ -798,7 +868,6 @@ function resumoFinanceiro(familiaId = null, usuarioId = null) {
   const emprestimos = listarEmprestimos(familiaId)
   const totalEmDividas = totalDividas(familiaId)
   const projecao = projecaoGastosMeses(4, familiaId, usuarioId)
-  const receitasProgramadas = listarReceitasProgramadas(familiaId, usuarioId)
   return { salarioTotal, rendaProgramada, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao, receitasProgramadas }
 }
 
@@ -844,15 +913,18 @@ function deletarOrcamento(id) {
 
 // ===== GASTOS RECORRENTES =====
 function listarRecorrentes(familiaId = null, usuarioId = null) {
-  if (usuarioId) return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE gr.usuario_id = ? ORDER BY gr.dia_mes, gr.descricao').all(usuarioId)
-  if (familiaId) return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE u.familia_id = ? ORDER BY u.nome, gr.dia_mes').all(familiaId)
-  return db.prepare('SELECT gr.*, u.nome as usuario_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id ORDER BY gr.criado_em').all()
+  const base = 'SELECT gr.*, u.nome as usuario_nome, c.nome as cartao_nome FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id LEFT JOIN cartoes c ON gr.cartao_id = c.id'
+  if (usuarioId) return db.prepare(`${base} WHERE gr.usuario_id = ? ORDER BY gr.dia_mes, gr.descricao`).all(usuarioId)
+  if (familiaId) return db.prepare(`${base} WHERE u.familia_id = ? ORDER BY u.nome, gr.dia_mes`).all(familiaId)
+  return db.prepare(`${base} ORDER BY gr.criado_em`).all()
 }
-function salvarRecorrente(usuarioId, descricao, valor, categoria, formaPagamento, diaMes) {
-  return db.prepare('INSERT INTO gastos_recorrentes (usuario_id, descricao, valor, categoria, forma_pagamento, dia_mes) VALUES (?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, categoria || 'Outros', formaPagamento || 'debito', diaMes || 1)
+function salvarRecorrente(usuarioId, descricao, valor, categoria, formaPagamento, diaMes, cartaoId = null) {
+  const cartao = formaPagamento === 'credito' ? (cartaoId || null) : null
+  return db.prepare('INSERT INTO gastos_recorrentes (usuario_id, descricao, valor, categoria, forma_pagamento, dia_mes, cartao_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(usuarioId, descricao, valor, categoria || 'Outros', formaPagamento || 'debito', diaMes || 1, cartao)
 }
-function atualizarRecorrente(id, descricao, valor, categoria, formaPagamento, diaMes, ativa) {
-  return db.prepare('UPDATE gastos_recorrentes SET descricao=?, valor=?, categoria=?, forma_pagamento=?, dia_mes=?, ativa=? WHERE id=?').run(descricao, valor, categoria, formaPagamento, diaMes, ativa ?? 1, id)
+function atualizarRecorrente(id, descricao, valor, categoria, formaPagamento, diaMes, ativa, cartaoId = null) {
+  const cartao = formaPagamento === 'credito' ? (cartaoId || null) : null
+  return db.prepare('UPDATE gastos_recorrentes SET descricao=?, valor=?, categoria=?, forma_pagamento=?, dia_mes=?, ativa=?, cartao_id=? WHERE id=?').run(descricao, valor, categoria, formaPagamento, diaMes, ativa ?? 1, cartao, id)
 }
 function deletarRecorrente(id) {
   return db.prepare('DELETE FROM gastos_recorrentes WHERE id = ?').run(id)
@@ -878,7 +950,8 @@ function processarRecorrentes(familiaId = null, usuarioId = null) {
     if (existente) continue
     const diaStr = String(Math.min(r.dia_mes, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate())).padStart(2, '0')
     const dataGasto = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${diaStr}`
-    db.prepare("INSERT INTO gastos (usuario_id, descricao, valor, categoria, forma_pagamento, data_gasto, origem, recorrente_id, parcelas, parcela_atual) VALUES (?, ?, ?, ?, ?, ?, 'recorrente', ?, 1, 1)").run(r.usuario_id, r.descricao, r.valor, r.categoria, r.forma_pagamento, dataGasto, r.id)
+    db.prepare("INSERT INTO gastos (usuario_id, cartao_id, descricao, valor, categoria, forma_pagamento, data_gasto, origem, recorrente_id, parcelas, parcela_atual) VALUES (?, ?, ?, ?, ?, ?, ?, 'recorrente', ?, 1, 1)").run(r.usuario_id, r.cartao_id || null, r.descricao, r.valor, r.categoria, r.forma_pagamento, dataGasto, r.id)
+    if (r.cartao_id) atualizarGastoCartao(r.cartao_id, r.valor)
     criados++
   }
   return criados

@@ -263,6 +263,7 @@
           <span><i class="cal-dot" style="background:#10b981"></i>entrada</span>
           <span><i class="cal-dot" style="background:#e11d48"></i>saída (cor da categoria)</span>
           <span><i class="cal-dot cal-dot-prev"></i>previsto</span>
+          <span><i class="cal-dot cal-dot-info" style="background:#e11d48"></i>compra no cartão (sai na fatura)</span>
         </div>
       </div>
       <div id="cal-dia-detalhe" class="cal-dia-detalhe"></div>
@@ -755,9 +756,10 @@
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <h3>💰 Registrar Receita</h3>
-    <p class="modal-desc">Entradas além do salário fixo: freelas, aluguéis, bônus etc.</p>
+    <p class="modal-desc">Salário, atendimentos, freelas, aluguéis, bônus… Ao lançar o salário, a estimativa do mês sai da previsão.</p>
     <div class="receita-tipos">
       <button class="rtipo-btn sel" onclick="selReceitaTipo(this,'Atendimento')">🩺 Atendimento</button>
+      <button class="rtipo-btn" onclick="selReceitaTipo(this,'Salário')">💼 Salário</button>
       <button class="rtipo-btn" onclick="selReceitaTipo(this,'Freelance')">💻 Freela</button>
       <button class="rtipo-btn" onclick="selReceitaTipo(this,'Aluguel')">🏠 Aluguel</button>
       <button class="rtipo-btn" onclick="selReceitaTipo(this,'Bônus')">🎁 Bônus</button>
@@ -817,6 +819,14 @@
 
       <div class="input-prefix"><span>R$</span><input id="rf-valor" type="text" inputmode="decimal" placeholder="Valor por recebimento" /></div>
       <input id="rf-obs" type="text" placeholder="Observação (opcional, ex: Pode variar)" />
+
+      <label class="rf-estimada">
+        <input id="rf-estimada" type="checkbox" />
+        <span>
+          <b>É uma estimativa</b> (ex.: salário que só se sabe no dia)
+          <small>Entra na previsão até você lançar uma receita 💼 Salário no mês; aí vale o valor real.</small>
+        </span>
+      </label>
 
       <div class="modal-btns">
         <button class="btn-cancel" onclick="fecharFormRenda()">Cancelar</button>
@@ -946,6 +956,10 @@
         <button class="forma-btn" onclick="selRecForma(this,'pix')">📱 PIX</button>
       </div>
       <input id="rec-forma-val" type="hidden" value="debito">
+      <div id="rec-campo-cartao" class="rf-campo" style="display:none;margin-top:8px">
+        <label class="input-label">Em qual cartão? <span class="input-hint">(o valor sai na fatura)</span></label>
+        <select id="rec-cartao" class="select-input"></select>
+      </div>
       <div class="rf-campo" style="margin-top:10px">
         <label class="input-label">Lançar todo dia</label>
         <input id="rec-dia" type="number" min="1" max="28" placeholder="Ex: 1, 5, 10..." />

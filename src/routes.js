@@ -340,9 +340,9 @@ router.get('/receitas-programadas', (req, res) => {
 
 router.post('/receitas-programadas', (req, res) => {
   try {
-    const { usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao } = req.body
+    const { usuarioId, descricao, valor, tipo, diaMes, diaSemana, observacao, estimada } = req.body
     if (!usuarioId || !descricao || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
-    const result = db.adicionarReceitaProgramada(parseInt(usuarioId), descricao, parseFloat(valor), tipo || 'mensal', diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null)
+    const result = db.adicionarReceitaProgramada(parseInt(usuarioId), descricao, parseFloat(valor), tipo || 'mensal', diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null, estimada ? 1 : 0)
     res.json({ id: Number(result.lastInsertRowid) })
   } catch (e) {
     res.status(500).json({ erro: e.message })
@@ -351,8 +351,8 @@ router.post('/receitas-programadas', (req, res) => {
 
 router.put('/receitas-programadas/:id', (req, res) => {
   try {
-    const { descricao, valor, tipo, diaMes, diaSemana, observacao, ativa } = req.body
-    db.atualizarReceitaProgramada(parseInt(req.params.id), descricao, parseFloat(valor), tipo, diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null, ativa ?? 1)
+    const { descricao, valor, tipo, diaMes, diaSemana, observacao, ativa, estimada } = req.body
+    db.atualizarReceitaProgramada(parseInt(req.params.id), descricao, parseFloat(valor), tipo, diaMes != null ? parseInt(diaMes) : null, diaSemana != null ? parseInt(diaSemana) : null, observacao || null, ativa ?? 1, estimada ? 1 : 0)
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ erro: e.message })
@@ -374,7 +374,8 @@ router.post('/receitas', (req, res) => {
   try {
     const { usuarioId, valor, descricao, dataReceita, tipo } = req.body
     if (!usuarioId || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
-    const tipoNorm = String(tipo || 'outro').trim().toLowerCase()
+    // Sem acento: 'Salário' tem de virar 'salario', que é o que tira a estimativa da previsão.
+    const tipoNorm = String(tipo || 'outro').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     const result = db.registrarReceita(usuarioId, valor, descricao || 'Receita', dataReceita || null, tipoNorm)
     res.json({ id: Number(result.lastInsertRowid) })
   } catch (e) {
@@ -664,14 +665,14 @@ router.get('/recorrentes', (req, res) => {
 })
 router.post('/recorrentes', (req, res) => {
   try {
-    const { usuarioId, descricao, valor, categoria, formaPagamento, diaMes } = req.body
-    res.json(db.salvarRecorrente(parseInt(usuarioId), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1))
+    const { usuarioId, descricao, valor, categoria, formaPagamento, diaMes, cartaoId } = req.body
+    res.json(db.salvarRecorrente(parseInt(usuarioId), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1, parseInt(cartaoId) || null))
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 router.put('/recorrentes/:id', (req, res) => {
   try {
-    const { descricao, valor, categoria, formaPagamento, diaMes, ativa } = req.body
-    res.json(db.atualizarRecorrente(parseInt(req.params.id), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1, ativa ?? 1))
+    const { descricao, valor, categoria, formaPagamento, diaMes, ativa, cartaoId } = req.body
+    res.json(db.atualizarRecorrente(parseInt(req.params.id), descricao, parseFloat(valor), categoria, formaPagamento, parseInt(diaMes) || 1, ativa ?? 1, parseInt(cartaoId) || null))
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 router.delete('/recorrentes/:id', (req, res) => {

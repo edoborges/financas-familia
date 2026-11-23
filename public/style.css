@@ -938,3 +938,21 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .cal-item-val{font-size:.88rem;font-weight:800;flex-shrink:0}
 .cal-dia-saldo{font-size:.8rem;color:#64748b;text-align:right;padding:4px 4px 0}
 .cal-dia-saldo b{font-weight:900}
+
+/* ═══ Fatura, compra no cartão e estimativa ═══ */
+.cal-dot-info{opacity:.3}
+.cal-item-info-cartao{opacity:.72;border-style:dashed;border-left-style:solid}
+.cal-fatura{margin-bottom:8px}
+.cal-fatura summary{list-style:none;cursor:pointer}
+.cal-fatura summary::-webkit-details-marker{display:none}
+.cal-fatura summary .cal-item{margin-bottom:0}
+.cal-fatura summary .cal-item-desc::after{content:' ▾';color:#94a3b8;font-weight:600}
+.cal-fatura[open] summary .cal-item-desc::after{content:' ▴'}
+.cal-fatura-compras{background:#f8fafc;border-radius:0 0 12px 12px;margin:-4px 0 0 4px;padding:10px 12px 6px;font-size:.76rem;color:#475569}
+.cal-fatura-compras div{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed #e2e8f0}
+.cal-fatura-compras div:last-child{border-bottom:none}
+.cal-fatura-compras span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag-estimada{color:#b45309;font-weight:700}
+.rf-estimada{display:flex;gap:10px;align-items:flex-start;background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:10px 12px;margin-top:10px;cursor:pointer;font-size:.82rem;color:#78350f;line-height:1.35}
+.rf-estimada input{width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:#d97706}
+.rf-estimada small{display:block;color:#92400e;opacity:.85;margin-top:3px;font-size:.74rem}
