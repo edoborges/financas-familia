@@ -8,17 +8,6 @@ if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true })
 const db = new DatabaseSync(path.join(dataPath, 'financeiro.db'))
 db.exec('PRAGMA journal_mode = WAL')
 
-// Migrações seguras
-try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch(e) {}
-try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
-try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
-try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
-try { db.exec("ALTER TABLE gastos ADD COLUMN recorrente_id INTEGER") } catch(e) {}
-try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
-try { db.exec("ALTER TABLE receitas ADD COLUMN tipo TEXT DEFAULT 'outro'") } catch(e) {}
-try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
-try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
-
 db.exec(`
   CREATE TABLE IF NOT EXISTS familias (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,6 +165,19 @@ db.exec(`
     atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `)
+
+// Migrações seguras. Precisam rodar DEPOIS do CREATE TABLE: num banco novo, um ALTER
+// antes do CREATE falha calado (tabela inexistente) e a coluna nunca é criada.
+// Em banco existente, a coluna já presente gera erro de duplicata, também ignorado.
+try { db.exec("ALTER TABLE usuarios ADD COLUMN pin TEXT DEFAULT '0000'") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN parcela_atual INTEGER DEFAULT 1") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE gastos ADD COLUMN recorrente_id INTEGER") } catch(e) {}
+try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE receitas ADD COLUMN tipo TEXT DEFAULT 'outro'") } catch(e) {}
+try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
+try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
 
 // Seed: garante que a família principal existe e usuários legados ficam nela
 const famCount = db.prepare('SELECT COUNT(*) as n FROM familias').get()
