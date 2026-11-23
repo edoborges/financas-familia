@@ -139,6 +139,16 @@
     <!-- ── ABA INÍCIO ── -->
     <section id="aba-inicio" class="aba">
 
+      <!-- Convite para ativar os avisos (some quando já estão ligados neste aparelho) -->
+      <div id="push-convite" class="push-convite" style="display:none" onclick="abrirModalPush()">
+        <span class="push-convite-icone">🔔</span>
+        <div class="push-convite-txt">
+          <b>Ativar avisos no celular</b>
+          <span>Lembrete das contas antes de vencer</span>
+        </div>
+        <span class="push-convite-btn">Ativar</span>
+      </div>
+
       <!-- Alertas de vencimento -->
       <div id="alertas-banner" class="alertas-banner" style="display:none"></div>
 
@@ -585,6 +595,18 @@
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <h3>⚙️ Ferramentas</h3>
+
+    <div class="ferr-secao">
+      <div class="ferr-titulo">🔔 Lembretes</div>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirModalPush()">
+        <span class="ferr-icon">🔔</span>
+        <div>
+          <div class="ferr-nome">Avisos no celular</div>
+          <div class="ferr-sub">Contas vencendo e orçamento estourando</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
 
     <div class="ferr-secao">
       <div class="ferr-titulo">📤 Exportar dados do mês atual</div>

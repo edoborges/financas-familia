@@ -1023,3 +1023,11 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .cal-desfazer{border:none;background:none;color:#94a3b8;font-size:.7rem;text-decoration:underline;cursor:pointer;padding:0}
 .cal-item-pago{opacity:.7}
 .cal-alerta-pend{background:#fff7ed;color:#9a3412;border-left-color:#f59e0b}
+
+/* ═══ Convite para ativar avisos (Início) ═══ */
+.push-convite{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1px solid #c7d2fe;border-radius:14px;padding:12px 14px;margin-bottom:14px;cursor:pointer}
+.push-convite-icone{font-size:1.5rem;flex-shrink:0}
+.push-convite-txt{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+.push-convite-txt b{font-size:.9rem;color:#312e81}
+.push-convite-txt span{font-size:.76rem;color:#4338ca}
+.push-convite-btn{background:#4f46e5;color:#fff;font-weight:700;font-size:.8rem;padding:8px 14px;border-radius:10px;flex-shrink:0}

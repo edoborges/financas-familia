@@ -3228,9 +3228,14 @@ async function estadoPush() {
 }
 
 async function atualizarBotaoAvisos() {
+  const estado = await estadoPush()
+  // Cartão de convite no topo do Início: some quando já está ativo. No iPhone antigo continua
+  // aparecendo para o modal explicar que precisa atualizar o iOS.
+  const convite = document.getElementById('push-convite')
+  const esconder = estado === 'ativo' || (estado === 'sem-suporte' && !ehIOS())
+  if (convite) convite.style.display = esconder ? 'none' : 'flex'
   const btn = document.getElementById('btn-avisos')
   if (!btn) return
-  const estado = await estadoPush()
   btn.textContent = estado === 'ativo' ? '🔔 Avisos ✓' : '🔔 Ativar avisos'
   btn.classList.toggle('btn-avisos-on', estado === 'ativo')
 }
@@ -3251,7 +3256,9 @@ async function abrirModalPush() {
         </ol>
         <small>Precisa do iOS 16.4 ou mais novo (Ajustes → Geral → Sobre).</small>
       </div>`,
-    'sem-suporte': `<div class="push-passos">Este navegador não aceita avisos. No Android, abra o app pelo <b>Chrome</b>.</div>`,
+    'sem-suporte': ehIOS()
+      ? `<div class="push-passos">Este iPhone ainda não aceita avisos de apps da tela inicial. Atualize para o <b>iOS 16.4 ou mais novo</b> (Ajustes → Geral → Atualização de Software) e tente de novo.</div>`
+      : `<div class="push-passos">Este navegador não aceita avisos. No Android, abra o app pelo <b>Chrome</b>.</div>`,
     'negado': `
       <div class="push-passos">
         <b>Os avisos foram bloqueados neste aparelho.</b> Para liberar:
