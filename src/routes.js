@@ -192,8 +192,8 @@ router.post('/gastos', (req, res) => {
 
 router.get('/gastos', (req, res) => {
   try {
-    const { mes, ano, familiaId } = req.query
-    res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null))
+    const { mes, ano, familiaId, usuarioId } = req.query
+    res.json(db.listarGastosMes(mes ? parseInt(mes) : null, ano ? parseInt(ano) : null, familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch (e) {
     res.status(500).json({ erro: e.message })
   }
@@ -678,6 +678,13 @@ router.put('/recorrentes/:id', (req, res) => {
 router.delete('/recorrentes/:id', (req, res) => {
   try {
     res.json(db.deletarRecorrente(parseInt(req.params.id)))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+// Cancelar / reativar uma assinatura sem precisar reenviar o cadastro inteiro.
+router.patch('/recorrentes/:id/ativa', (req, res) => {
+  try {
+    db.setarAtivaRecorrente(parseInt(req.params.id), req.body.ativa ? 1 : 0)
+    res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 router.post('/recorrentes/processar', (req, res) => {

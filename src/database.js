@@ -926,6 +926,9 @@ function atualizarRecorrente(id, descricao, valor, categoria, formaPagamento, di
   const cartao = formaPagamento === 'credito' ? (cartaoId || null) : null
   return db.prepare('UPDATE gastos_recorrentes SET descricao=?, valor=?, categoria=?, forma_pagamento=?, dia_mes=?, ativa=?, cartao_id=? WHERE id=?').run(descricao, valor, categoria, formaPagamento, diaMes, ativa ?? 1, cartao, id)
 }
+function setarAtivaRecorrente(id, ativa) {
+  return db.prepare('UPDATE gastos_recorrentes SET ativa = ? WHERE id = ?').run(ativa ? 1 : 0, id)
+}
 function deletarRecorrente(id) {
   return db.prepare('DELETE FROM gastos_recorrentes WHERE id = ?').run(id)
 }
@@ -1015,7 +1018,7 @@ module.exports = {
   listarGastosExport, listarReceitasExport,
   alertasVencimento,
   listarOrcamentos, salvarOrcamento, deletarOrcamento,
-  listarRecorrentes, salvarRecorrente, atualizarRecorrente, deletarRecorrente, processarRecorrentes,
+  listarRecorrentes, salvarRecorrente, atualizarRecorrente, setarAtivaRecorrente, deletarRecorrente, processarRecorrentes,
   obterMetaRenda, salvarMetaRenda, calcularMetaRenda, custoDividas,
   calendarioMes,
   resumoFinanceiro

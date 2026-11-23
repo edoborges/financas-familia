@@ -117,7 +117,10 @@ Regras:
 }
 
 async function gerarPlanoEconomia(dados) {
-  const { salarioTotal, gastosMes, metas, cartoes, categorias } = dados
+  const { salarioTotal, rendaTotal, gastosMes, metas, cartoes, categorias } = dados
+  // Renda real do mês (programadas + lançadas). salarioTotal é o campo legado do cadastro,
+  // quase sempre zerado — com ele o plano partia de "renda R$0".
+  const renda = Number(rendaTotal ?? salarioTotal) || 0
 
   const metasTexto = metas.map(m =>
     `- ${m.nome}: meta R$${m.valor_alvo}, economizado R$${m.valor_atual}${m.prazo ? `, prazo ${m.prazo}` : ''}`
@@ -130,9 +133,9 @@ async function gerarPlanoEconomia(dados) {
   const prompt = `Você é um consultor financeiro pessoal. Analise os dados financeiros do casal e crie um plano de economia personalizado.
 
 DADOS FINANCEIROS:
-- Renda total do casal: R$${salarioTotal.toFixed(2)}/mês
+- Renda total do casal: R$${renda.toFixed(2)}/mês
 - Total gasto este mês: R$${gastosMes.toFixed(2)}
-- Saldo disponível: R$${(salarioTotal - gastosMes).toFixed(2)}
+- Saldo disponível: R$${(renda - gastosMes).toFixed(2)}
 
 GASTOS POR CATEGORIA ESTE MÊS:
 ${categoriasTexto}

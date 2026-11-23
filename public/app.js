@@ -522,22 +522,42 @@ function renderProjecao(projecao) {
 // ── RELATÓRIO COMPLETO ──
 let chartEvolucao = null, chartCats2 = null
 
+// Mês escolhido no relatório para "por categoria", maiores saídas e comparativo.
+let relMes = null, relAno = null
+
 async function abrirRelatorio() {
+  const now = new Date()
+  relMes = now.getMonth() + 1
+  relAno = now.getFullYear()
   document.getElementById('modal-relatorio').style.display = 'flex'
+  await renderRelatorio()
+}
+
+function navegarRelatorio(delta) {
+  relMes += delta
+  if (relMes > 12) { relMes = 1; relAno++ }
+  if (relMes < 1) { relMes = 12; relAno-- }
+  renderRelatorio()
+}
+
+async function renderRelatorio() {
   document.getElementById('relatorio-conteudo').innerHTML =
     '<div class="plano-loading"><div class="spinner"></div><p>Carregando...</p></div>'
 
-  // Mês anterior para o comparativo
+  // Mês anterior ao escolhido, para o comparativo
+  const mesPrev = relMes === 1 ? 12 : relMes - 1
+  const anoPrev = relMes === 1 ? relAno - 1 : relAno
   const now = new Date()
-  const mesPrev = now.getMonth() === 0 ? 12 : now.getMonth()
-  const anoPrev = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
+  const ehMesAtual = relMes === now.getMonth() + 1 && relAno === now.getFullYear()
 
-  const [gastosEv, receitasEv, cats, catsPrev] = await Promise.all([
+  const [gastosEv, receitasEv, cats, catsPrev, gastosDoMes] = await Promise.all([
     api('/gastos/evolucao' + famQ()),
     api('/receitas/evolucao' + famQ()),
-    api('/gastos/categorias' + famQ()),
-    api(`/gastos/categorias?mes=${mesPrev}&ano=${anoPrev}${famQAnd()}`)
+    api(`/gastos/categorias?mes=${relMes}&ano=${relAno}${famQAnd()}`),
+    api(`/gastos/categorias?mes=${mesPrev}&ano=${anoPrev}${famQAnd()}`),
+    api(`/gastos?mes=${relMes}&ano=${relAno}${famQAnd()}`)
   ])
+  const maioresSaidas = (gastosDoMes || []).slice().sort((a, b) => b.valor - a.valor).slice(0, 5)
 
   const nomeMes = mesStr => {
     const [,n] = mesStr.split('-')
@@ -569,10 +589,28 @@ async function abrirRelatorio() {
       <div class="rel-titulo">Balanço mensal</div>
       <div id="rel-balanco" class="rel-balanco"></div>
     </div>
+    <div class="rel-mes-nav">
+      <button class="cal-nav" onclick="navegarRelatorio(-1)" aria-label="Mês anterior">‹</button>
+      <div class="rel-mes-titulo">Para onde foi o dinheiro<b>${NOMES_MES[relMes - 1]} ${relAno}${ehMesAtual ? ' · mês atual' : ''}</b></div>
+      <button class="cal-nav" onclick="navegarRelatorio(1)" aria-label="Próximo mês">›</button>
+    </div>
     <div class="rel-secao">
-      <div class="rel-titulo">Por categoria — mês atual</div>
+      <div class="rel-titulo">Por categoria</div>
       ${cats.length ? `<canvas id="chart-cats" style="max-height:180px;margin-bottom:12px"></canvas>
-      <div id="rel-cat-lista" class="cat-lista"></div>` : '<p style="color:#94a3b8;font-size:.88rem">Nenhum gasto lançado este mês.</p>'}
+      <div id="rel-cat-lista" class="cat-lista"></div>` : '<p style="color:#94a3b8;font-size:.88rem">Nenhum gasto lançado neste mês.</p>'}
+    </div>
+    <div class="rel-secao">
+      <div class="rel-titulo">Maiores saídas</div>
+      ${maioresSaidas.length ? maioresSaidas.map((g, i) => `
+        <div class="rel-top-item">
+          <span class="rel-top-pos">${i + 1}</span>
+          <span class="rel-top-ico">${EMOJI_CAT[g.categoria] || '📦'}</span>
+          <div class="rel-top-info">
+            <div class="rel-top-desc">${g.descricao}</div>
+            <div class="rel-top-meta"><i class="cal-dot" style="background:${corCat(g.categoria)}"></i> ${g.categoria} · ${String(g.data_gasto).slice(8, 10)}/${String(g.data_gasto).slice(5, 7)}${g.cartao_nome ? ' · 💳 ' + g.cartao_nome : ''}</div>
+          </div>
+          <b class="rel-top-val">${fmt(g.valor)}</b>
+        </div>`).join('') : '<p style="color:#94a3b8;font-size:.88rem">Nenhuma saída neste mês.</p>'}
     </div>
     <div class="rel-secao" id="rel-comparativo-secao">
       <div class="rel-titulo">📊 Comparativo vs ${nomeMesPrev}</div>
@@ -826,14 +864,16 @@ function appendChat(el) {
 async function carregarMetas() {
   const [metas, resumo] = await Promise.all([api('/metas' + famQ()), api('/resumo' + famQ())])
 
-  // Resumo financeiro do planejamento
-  const economia = resumo.salarioTotal - resumo.gastosMes
+  // Resumo financeiro do planejamento. Usa a renda real do mês (programadas + lançadas),
+  // a mesma do Início — salarioTotal é o campo legado do cadastro e costuma estar zerado.
+  const renda = resumo.rendaTotal || 0
+  const economia = renda - resumo.gastosMes
   document.getElementById('plan-resumo').innerHTML = `
     <div style="color:#e2e8f0;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💡 Visão do Planejamento</div>
     <div class="plan-resumo-grid">
       <div class="plan-item">
-        <div class="plan-item-label">Renda do casal</div>
-        <div class="plan-item-valor">${fmt(resumo.salarioTotal)}</div>
+        <div class="plan-item-label">${visaoAtual === 'consolidado' ? 'Renda do casal' : 'Sua renda'}</div>
+        <div class="plan-item-valor">${fmt(renda)}</div>
       </div>
       <div class="plan-item">
         <div class="plan-item-label">Gastos do mês</div>
@@ -841,7 +881,7 @@ async function carregarMetas() {
       </div>
       <div class="plan-item">
         <div class="plan-item-label">Economia possível</div>
-        <div class="plan-item-valor" style="color:#4ade80">${fmt(economia)}</div>
+        <div class="plan-item-valor" style="color:${economia >= 0 ? '#4ade80' : '#fb7185'}">${fmt(economia)}</div>
       </div>
       <div class="plan-item">
         <div class="plan-item-label">Metas ativas</div>
@@ -877,11 +917,50 @@ async function carregarMetas() {
         <div class="meta-barra"><div class="meta-barra-fill" style="width:${pct}%"></div></div>
         <div class="meta-valores">
           <span>Guardado: ${fmt(m.valor_atual)}</span>
-          <span>Faltam: ${fmt(faltam)}</span>
+          <span>${faltam > 0 ? `Faltam: ${fmt(faltam)}` : '🎉 Meta alcançada'}</span>
         </div>
+        <button class="meta-aporte-btn" onclick="abrirAporte(${JSON.stringify({ id: m.id, nome: m.nome, emoji: m.emoji, valor_atual: m.valor_atual, valor_alvo: m.valor_alvo }).replace(/"/g,'&quot;')})">💰 Aportar</button>
       </div>
     `
   }).join('')
+}
+
+// ── APORTE NA META ──
+let aporteMeta = null, aporteTipo = 'guardar'
+
+function abrirAporte(meta) {
+  aporteMeta = meta
+  document.getElementById('aporte-titulo').textContent = `${meta.emoji || '🎯'} ${meta.nome}`
+  document.getElementById('aporte-info').textContent = `Guardado ${fmt(meta.valor_atual)} de ${fmt(meta.valor_alvo)}.`
+  document.getElementById('aporte-valor').value = ''
+  selAporteTipo('guardar')
+  document.getElementById('modal-aporte').style.display = 'flex'
+  document.getElementById('aporte-valor').focus()
+}
+
+function selAporteTipo(tipo) {
+  aporteTipo = tipo
+  document.getElementById('aporte-btn-guardar').classList.toggle('sel', tipo === 'guardar')
+  document.getElementById('aporte-btn-retirar').classList.toggle('sel', tipo === 'retirar')
+}
+
+async function salvarAporte() {
+  const valor = parseBRL(document.getElementById('aporte-valor').value)
+  if (!valor || valor <= 0) { toast('Informe o valor!', 'erro'); return }
+  const atual = Number(aporteMeta.valor_atual) || 0
+  if (aporteTipo === 'retirar' && valor > atual) { toast(`Só há ${fmt(atual)} guardado nessa meta`, 'erro'); return }
+  const novo = +(aporteTipo === 'guardar' ? atual + valor : atual - valor).toFixed(2)
+  try {
+    await api(`/metas/${aporteMeta.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ valorAtual: novo })
+    })
+    fecharModal('modal-aporte')
+    const bateu = aporteTipo === 'guardar' && atual < aporteMeta.valor_alvo && novo >= aporteMeta.valor_alvo
+    toast(bateu ? `🎉 Meta "${aporteMeta.nome}" alcançada!` : aporteTipo === 'guardar' ? `💰 ${fmt(valor)} guardados` : `➖ ${fmt(valor)} retirados`)
+    carregarMetas()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
 }
 
 // ── CARTÕES ──
@@ -963,8 +1042,8 @@ function mostrarAba(nome) {
 }
 
 // ── ABA CONTAS ──
-const TIPO_LABEL_CONTA = { corrente: 'Conta Corrente', poupanca: 'Poupança', investimento: 'Investimento' }
-const TIPO_ICONE_CONTA = { corrente: '🏦', poupanca: '🐷', investimento: '📈' }
+const TIPO_LABEL_CONTA = { corrente: 'Conta Corrente', poupanca: 'Poupança', investimento: 'Investimento', dinheiro: 'Carteira' }
+const TIPO_ICONE_CONTA = { corrente: '🏦', poupanca: '🐷', investimento: '📈', dinheiro: '👛' }
 const CORES_CONTA = ['#2563eb','#16a34a','#7c3aed','#d97706','#0891b2','#db2777']
 
 async function carregarContas() {
@@ -1978,7 +2057,8 @@ async function abrirRelatorioHTML() {
   try {
     const { gastos, receitas, resumo } = await api(`/exportar/dados?mes=${mes}&ano=${ano}${famQAnd()}`)
     const nomeMes = now.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
-    const totalReceitas = receitas.reduce((a, r) => a + r.valor, 0) + (resumo.salarioTotal || 0)
+    // rendaTotal já é renda programada + receitas lançadas no mês (somar as receitas de novo duplicaria).
+    const totalReceitas = resumo.rendaTotal ?? (receitas.reduce((a, r) => a + r.valor, 0) + (resumo.salarioTotal || 0))
     const totalGastos = gastos.reduce((a, g) => a + g.valor, 0)
     const resultado = totalReceitas - totalGastos
 
@@ -2495,6 +2575,7 @@ async function renderOrcamentosSecao() {
         <div class="orc-barra-bg">
           <div class="orc-barra-fill" style="width:${Math.min(pct,100)}%;background:${cor};transition:width .5s"></div>
         </div>
+        <div class="orc-sobra" style="color:${cor}">${gasto <= o.valor_limite ? `Sobram ${fmt(o.valor_limite - gasto)}` : `Estourou ${fmt(gasto - o.valor_limite)}`}</div>
       </div>`
     }).join('')
   } catch(e) {}
@@ -2505,6 +2586,7 @@ async function renderOrcamentosSecao() {
 // ══════════════════════════════════════════
 let recFormaAtual = 'debito'
 let recEdicaoId = null
+let recAtivaAtual = 1  // editar não pode reativar uma assinatura cancelada
 
 async function abrirModalRecorrentes() {
   document.getElementById('modal-recorrentes').style.display = 'flex'
@@ -2522,13 +2604,23 @@ async function carregarListaRecorrentes() {
       el.innerHTML = '<p style="color:#94a3b8;font-size:.85rem;text-align:center;padding:12px 0">Nenhum gasto recorrente cadastrado.</p>'
       return
     }
-    el.innerHTML = lista.map(r => {
+    // Total do que ainda está ativo; as canceladas vão pro fim da lista.
+    const ativos = lista.filter(r => r.ativa)
+    const totalMensal = ativos.reduce((acc, r) => acc + Number(r.valor), 0)
+    const totalAssinaturas = ativos.filter(r => r.categoria === 'Assinatura').reduce((acc, r) => acc + Number(r.valor), 0)
+    const resumo = `<div class="rec-total">
+      <div><small title="${ativos.length} ${ativos.length === 1 ? 'ativo' : 'ativos'}">Por mês (${ativos.length})</small><b>${fmt(totalMensal)}</b></div>
+      ${totalAssinaturas > 0 ? `<div><small>Assinaturas</small><b>${fmt(totalAssinaturas)}</b></div>` : ''}
+      <div><small>Por ano</small><b>${fmt(totalMensal * 12)}</b></div>
+    </div>`
+
+    el.innerHTML = resumo + lista.slice().sort((a, b) => b.ativa - a.ativa).map(r => {
       const cat = EMOJI_CAT_ORC[r.categoria] || '📦'
       const diaLabel = `Todo dia ${r.dia_mes}`
-      const pausado = !r.ativa ? ' <span style="color:#f59e0b;font-size:.7rem">⏸ pausado</span>' : ''
-      return `<div class="renda-item">
+      const cancelada = !r.ativa ? ' <span class="rec-tag-cancelada">cancelada</span>' : ''
+      return `<div class="renda-item${r.ativa ? '' : ' rec-cancelada'}">
         <div class="renda-item-top">
-          <span class="renda-item-desc">${cat} ${r.descricao}${pausado}</span>
+          <span class="renda-item-desc">${cat} ${r.descricao}${cancelada}</span>
           <span class="renda-item-val">${fmt(r.valor)}</span>
         </div>
         <div class="renda-item-bot">
@@ -2537,6 +2629,9 @@ async function carregarListaRecorrentes() {
         </div>
         <div class="renda-item-acoes">
           <button onclick="editarRecorrente(${JSON.stringify(r).replace(/"/g,'&quot;')})">✏️ Editar</button>
+          ${r.ativa
+            ? `<button onclick="alternarRecorrente(${r.id}, false)">🚫 Cancelar</button>`
+            : `<button onclick="alternarRecorrente(${r.id}, true)">↩️ Reativar</button>`}
           <button class="btn-excluir" onclick="deletarRecorrente(${r.id})">🗑 Excluir</button>
         </div>
       </div>`
@@ -2548,6 +2643,7 @@ async function carregarListaRecorrentes() {
 
 function abrirFormRecorrente() {
   recEdicaoId = null
+  recAtivaAtual = 1
   recFormaAtual = 'debito'
   document.getElementById('rec-id').value = ''
   document.getElementById('rec-desc').value = ''
@@ -2591,6 +2687,7 @@ function selRecForma(btn, forma) {
 
 function editarRecorrente(r) {
   recEdicaoId = r.id
+  recAtivaAtual = r.ativa ? 1 : 0
   document.getElementById('rec-id').value = r.id
   document.getElementById('rec-desc').value = r.descricao
   document.getElementById('rec-valor').value = String(r.valor).replace('.', ',')
@@ -2619,7 +2716,7 @@ async function salvarRecorrente() {
       await api(`/recorrentes/${recEdicaoId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, ativa: 1, cartaoId })
+        body: JSON.stringify({ descricao: desc, valor, categoria, formaPagamento: forma, diaMes: dia, ativa: recAtivaAtual, cartaoId })
       })
       toast(`✅ "${desc}" atualizado!`)
     } else {
@@ -2633,6 +2730,19 @@ async function salvarRecorrente() {
     fecharFormRecorrente()
     await carregarListaRecorrentes()
     await processarRecorrentesAuto()
+    carregarInicio()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+}
+
+async function alternarRecorrente(id, ativa) {
+  try {
+    await api(`/recorrentes/${id}/ativa`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ativa })
+    })
+    toast(ativa ? '↩️ Reativada: volta a ser lançada todo mês' : '🚫 Cancelada: não será mais lançada nem prevista')
+    await carregarListaRecorrentes()
     carregarInicio()
   } catch(e) { toast('❌ ' + e.message, 'erro') }
 }
@@ -2677,28 +2787,28 @@ async function renderMetaRendaCard() {
     // A linha de ação é o ponto do card: transformar o gap em nº de atendimentos.
     let acao
     if (fechou) {
-      acao = `<div class="meta-acao" style="color:#10b981">🎉 Meta batida — sobra de ${fmt(m.realizado - m.alvo)}</div>`
+      acao = `<div class="mr-acao" style="color:#10b981">🎉 Meta batida — sobra de ${fmt(m.realizado - m.alvo)}</div>`
     } else if (m.atendimentosNecessarios == null) {
-      acao = `<div class="meta-acao meta-acao-vazia">Informe o ticket médio para ver quantos atendimentos faltam →</div>`
+      acao = `<div class="mr-acao mr-acao-vazia">Informe o ticket médio para ver quantos atendimentos faltam →</div>`
     } else {
       const plural = m.atendimentosNecessarios === 1 ? 'atendimento' : 'atendimentos'
-      acao = `<div class="meta-acao">Faltam <b>${m.atendimentosNecessarios} ${plural}</b> · ~${m.porSemana}/semana nos ${m.diasRestantes} dias restantes</div>`
+      acao = `<div class="mr-acao">Faltam <b>${m.atendimentosNecessarios} ${plural}</b> · ~${m.porSemana}/semana nos ${m.diasRestantes} dias restantes</div>`
     }
 
     el.innerHTML = `
-      <div class="meta-topo">
-        <span class="meta-titulo">🎯 Meta do mês</span>
-        <span class="meta-pct" style="color:${cor}">${pct}%</span>
+      <div class="mr-topo">
+        <span class="mr-titulo">🎯 Meta do mês</span>
+        <span class="mr-pct" style="color:${cor}">${pct}%</span>
       </div>
-      <div class="meta-valores">
-        <span class="meta-realizado">${fmt(m.realizado)}</span>
-        <span class="meta-alvo">de ${fmt(m.alvo)}</span>
+      <div class="mr-valores">
+        <span class="mr-realizado">${fmt(m.realizado)}</span>
+        <span class="mr-alvo">de ${fmt(m.alvo)}</span>
       </div>
-      <div class="meta-barra-bg"><div class="meta-barra-fill" style="width:${pct}%;background:${cor}"></div></div>
+      <div class="mr-barra-bg"><div class="mr-barra-fill" style="width:${pct}%;background:${cor}"></div></div>
       ${acao}
     `
   } catch(e) {
-    el.innerHTML = `<div class="meta-acao meta-acao-vazia">Meta indisponível</div>`
+    el.innerHTML = `<div class="mr-acao mr-acao-vazia">Meta indisponível</div>`
   }
 }
 
@@ -2728,12 +2838,12 @@ function fmtNum(v) {
 function metaFonteLinha(label, valor, total, cor) {
   const pct = total > 0 ? (valor / total) * 100 : 0
   return `
-    <div class="meta-fonte">
-      <div class="meta-fonte-top">
+    <div class="mr-fonte">
+      <div class="mr-fonte-top">
         <span>${label}</span>
         <b>${fmt(valor)}</b>
       </div>
-      <div class="meta-fonte-bg"><div class="meta-fonte-fill" style="width:${pct}%;background:${cor}"></div></div>
+      <div class="mr-fonte-bg"><div class="mr-fonte-fill" style="width:${pct}%;background:${cor}"></div></div>
     </div>
   `
 }
@@ -2754,28 +2864,28 @@ function renderMetaDetalhe(m) {
   if (m.gap > 0 && m.atendimentosNecessarios != null) {
     const totalNoMes = m.atendimentos.qtd + m.atendimentosNecessarios
     if (m.melhorMes > 0 && totalNoMes > m.melhorMes * 1.5) {
-      veredito = `<div class="meta-dica meta-dica-alerta">⚠️ Isso daria ${totalNoMes} atendimentos no mês. Seu melhor mês registrado foi ${m.melhorMes}. Ou o ticket precisa subir, ou a meta precisa de outra fonte de renda.</div>`
+      veredito = `<div class="mr-dica mr-dica-alerta">⚠️ Isso daria ${totalNoMes} atendimentos no mês. Seu melhor mês registrado foi ${m.melhorMes}. Ou o ticket precisa subir, ou a meta precisa de outra fonte de renda.</div>`
     } else {
-      veredito = `<div class="meta-dica">✅ ${totalNoMes} atendimentos no mês — dentro do que você já fez (melhor mês: ${m.melhorMes || '—'}).</div>`
+      veredito = `<div class="mr-dica">✅ ${totalNoMes} atendimentos no mês — dentro do que você já fez (melhor mês: ${m.melhorMes || '—'}).</div>`
     }
   }
 
   const ticketInfo = m.ticket > 0
-    ? `<div class="meta-linha-info">Ticket usado: <b>${fmt(m.ticket)}</b> ${m.ticketManual > 0 ? '(definido por você)' : '(média real do histórico)'}</div>`
-    : `<div class="meta-linha-info">Sem ticket médio ainda — registre atendimentos ou informe um valor abaixo.</div>`
+    ? `<div class="mr-linha-info">Ticket usado: <b>${fmt(m.ticket)}</b> ${m.ticketManual > 0 ? '(definido por você)' : '(média real do histórico)'}</div>`
+    : `<div class="mr-linha-info">Sem ticket médio ainda — registre atendimentos ou informe um valor abaixo.</div>`
 
   el.innerHTML = `
-    <div class="meta-resumo-grid">
-      <div class="meta-box">
-        <span class="meta-box-label">Realizado</span>
-        <span class="meta-box-val" style="color:#10b981">${fmt(m.realizado)}</span>
+    <div class="mr-resumo-grid">
+      <div class="mr-box">
+        <span class="mr-box-label">Realizado</span>
+        <span class="mr-box-val" style="color:#10b981">${fmt(m.realizado)}</span>
       </div>
-      <div class="meta-box">
-        <span class="meta-box-label">Falta</span>
-        <span class="meta-box-val" style="color:${m.gap > 0 ? '#e11d48' : '#10b981'}">${fmt(m.gap)}</span>
+      <div class="mr-box">
+        <span class="mr-box-label">Falta</span>
+        <span class="mr-box-val" style="color:${m.gap > 0 ? '#e11d48' : '#10b981'}">${fmt(m.gap)}</span>
       </div>
     </div>
-    <div class="meta-fontes">${fontes}</div>
+    <div class="mr-fontes">${fontes}</div>
     ${ticketInfo}
     ${veredito}
   `
@@ -2790,7 +2900,7 @@ function renderMetaDividas(dividas) {
   }
   const totalJuros = dividas.reduce((a, d) => a + d.juros_mes, 0)
   el.innerHTML = `
-    <div class="meta-linha-info">Você paga cerca de <b style="color:#e11d48">${fmt(totalJuros)}/mês</b> só em juros. Quitar de cima para baixo é o que economiza mais.</div>
+    <div class="mr-linha-info">Você paga cerca de <b style="color:#e11d48">${fmt(totalJuros)}/mês</b> só em juros. Quitar de cima para baixo é o que economiza mais.</div>
     ${dividas.map((d, i) => `
       <div class="divida-item">
         <div class="divida-rank">${i + 1}</div>
