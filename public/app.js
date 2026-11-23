@@ -376,6 +376,9 @@ async function carregarInicio() {
     const score = calcularScore(resumo, orcs, cats)
     renderScoreCard(score)
 
+    // Meta de renda
+    renderMetaRendaCard()
+
     // Patrimônio líquido
     renderPatrimonio(resumo)
 
@@ -1691,7 +1694,7 @@ async function abrirModalReceita() {
   document.getElementById('r-valor').value = ''
   document.querySelectorAll('.rtipo-btn').forEach(b => b.classList.remove('sel'))
   document.querySelector('.rtipo-btn')?.classList.add('sel')
-  receitaTipoSel = 'Freelance'
+  receitaTipoSel = 'Atendimento'  // precisa bater com o 1º .rtipo-btn, que recebe .sel acima
   document.getElementById('modal-receita').style.display = 'flex'
   await carregarReceitasMes()
 }
@@ -1760,7 +1763,7 @@ async function salvarReceita() {
     await api('/receitas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuarioId: usuario.id, valor, descricao, dataReceita: dataReceita || null })
+      body: JSON.stringify({ usuarioId: usuario.id, valor, descricao, dataReceita: dataReceita || null, tipo: receitaTipoSel })
     })
     document.getElementById('r-descricao').value = ''
     document.getElementById('r-valor').value = ''
@@ -2621,6 +2624,175 @@ async function processarRecorrentesAuto() {
       carregarInicio()
     }
   } catch(e) { /* silently ignore */ }
+}
+
+// ══════════════════════════════════════════
+//  META DE RENDA
+// ══════════════════════════════════════════
+let _metaData = null
+
+async function renderMetaRendaCard() {
+  const el = document.getElementById('meta-renda-card')
+  if (!el) return
+  try {
+    const m = await api('/meta-renda' + famQ())
+    _metaData = m
+
+    const pct = Math.round(m.pct)
+    const fechou = m.gap <= 0
+    const cor = fechou ? '#10b981' : pct >= 70 ? '#6366f1' : pct >= 40 ? '#f59e0b' : '#e11d48'
+
+    // A linha de ação é o ponto do card: transformar o gap em nº de atendimentos.
+    let acao
+    if (fechou) {
+      acao = `<div class="meta-acao" style="color:#10b981">🎉 Meta batida — sobra de ${fmt(m.realizado - m.alvo)}</div>`
+    } else if (m.atendimentosNecessarios == null) {
+      acao = `<div class="meta-acao meta-acao-vazia">Informe o ticket médio para ver quantos atendimentos faltam →</div>`
+    } else {
+      const plural = m.atendimentosNecessarios === 1 ? 'atendimento' : 'atendimentos'
+      acao = `<div class="meta-acao">Faltam <b>${m.atendimentosNecessarios} ${plural}</b> · ~${m.porSemana}/semana nos ${m.diasRestantes} dias restantes</div>`
+    }
+
+    el.innerHTML = `
+      <div class="meta-topo">
+        <span class="meta-titulo">🎯 Meta do mês</span>
+        <span class="meta-pct" style="color:${cor}">${pct}%</span>
+      </div>
+      <div class="meta-valores">
+        <span class="meta-realizado">${fmt(m.realizado)}</span>
+        <span class="meta-alvo">de ${fmt(m.alvo)}</span>
+      </div>
+      <div class="meta-barra-bg"><div class="meta-barra-fill" style="width:${pct}%;background:${cor}"></div></div>
+      ${acao}
+    `
+  } catch(e) {
+    el.innerHTML = `<div class="meta-acao meta-acao-vazia">Meta indisponível</div>`
+  }
+}
+
+async function abrirModalMetaRenda() {
+  document.getElementById('modal-meta-renda').style.display = 'flex'
+  document.getElementById('meta-detalhe').innerHTML = '<div class="sk-lines"><div class="sk-line"></div><div class="sk-line"></div></div>'
+  document.getElementById('meta-dividas').innerHTML = ''
+  try {
+    const [m, dividas] = await Promise.all([
+      api('/meta-renda' + famQ()),
+      api('/dividas/custo' + famQ())
+    ])
+    _metaData = m
+    document.getElementById('meta-alvo').value = m.alvo ? fmtNum(m.alvo) : ''
+    document.getElementById('meta-ticket').value = m.ticketManual ? fmtNum(m.ticketManual) : ''
+    renderMetaDetalhe(m)
+    renderMetaDividas(dividas)
+  } catch(e) {
+    document.getElementById('meta-detalhe').innerHTML = `<div class="orc-vazio">Erro ao carregar: ${e.message}</div>`
+  }
+}
+
+function fmtNum(v) {
+  return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function metaFonteLinha(label, valor, total, cor) {
+  const pct = total > 0 ? (valor / total) * 100 : 0
+  return `
+    <div class="meta-fonte">
+      <div class="meta-fonte-top">
+        <span>${label}</span>
+        <b>${fmt(valor)}</b>
+      </div>
+      <div class="meta-fonte-bg"><div class="meta-fonte-fill" style="width:${pct}%;background:${cor}"></div></div>
+    </div>
+  `
+}
+
+function renderMetaDetalhe(m) {
+  const f = m.fontes
+  const el = document.getElementById('meta-detalhe')
+
+  const fontes = [
+    metaFonteLinha('💼 Fixa (salário/adiantamento)', f.fixa, m.alvo, '#6366f1'),
+    metaFonteLinha('📅 Semanal', f.semanal, m.alvo, '#0ea5e9'),
+    metaFonteLinha(`🩺 Atendimentos (${m.atendimentos.qtd})`, f.atendimentos, m.alvo, '#10b981'),
+    metaFonteLinha('📦 Outras', f.outras, m.alvo, '#94a3b8')
+  ].join('')
+
+  // Régua de realismo: comparar o esforço exigido com o melhor mês já feito.
+  let veredito = ''
+  if (m.gap > 0 && m.atendimentosNecessarios != null) {
+    const totalNoMes = m.atendimentos.qtd + m.atendimentosNecessarios
+    if (m.melhorMes > 0 && totalNoMes > m.melhorMes * 1.5) {
+      veredito = `<div class="meta-dica meta-dica-alerta">⚠️ Isso daria ${totalNoMes} atendimentos no mês. Seu melhor mês registrado foi ${m.melhorMes}. Ou o ticket precisa subir, ou a meta precisa de outra fonte de renda.</div>`
+    } else {
+      veredito = `<div class="meta-dica">✅ ${totalNoMes} atendimentos no mês — dentro do que você já fez (melhor mês: ${m.melhorMes || '—'}).</div>`
+    }
+  }
+
+  const ticketInfo = m.ticket > 0
+    ? `<div class="meta-linha-info">Ticket usado: <b>${fmt(m.ticket)}</b> ${m.ticketManual > 0 ? '(definido por você)' : '(média real do histórico)'}</div>`
+    : `<div class="meta-linha-info">Sem ticket médio ainda — registre atendimentos ou informe um valor abaixo.</div>`
+
+  el.innerHTML = `
+    <div class="meta-resumo-grid">
+      <div class="meta-box">
+        <span class="meta-box-label">Realizado</span>
+        <span class="meta-box-val" style="color:#10b981">${fmt(m.realizado)}</span>
+      </div>
+      <div class="meta-box">
+        <span class="meta-box-label">Falta</span>
+        <span class="meta-box-val" style="color:${m.gap > 0 ? '#e11d48' : '#10b981'}">${fmt(m.gap)}</span>
+      </div>
+    </div>
+    <div class="meta-fontes">${fontes}</div>
+    ${ticketInfo}
+    ${veredito}
+  `
+}
+
+function renderMetaDividas(dividas) {
+  const el = document.getElementById('meta-dividas')
+  if (!el) return
+  if (!dividas.length) {
+    el.innerHTML = `<div class="orc-vazio">Nenhuma dívida ativa 🎉</div>`
+    return
+  }
+  const totalJuros = dividas.reduce((a, d) => a + d.juros_mes, 0)
+  el.innerHTML = `
+    <div class="meta-linha-info">Você paga cerca de <b style="color:#e11d48">${fmt(totalJuros)}/mês</b> só em juros. Quitar de cima para baixo é o que economiza mais.</div>
+    ${dividas.map((d, i) => `
+      <div class="divida-item">
+        <div class="divida-rank">${i + 1}</div>
+        <div class="divida-info">
+          <div class="divida-desc">${d.descricao}</div>
+          <div class="divida-meta">${d.credor} · saldo ${fmt(d.saldo)} · ${d.taxa_juros}% a.m.</div>
+        </div>
+        <div class="divida-custo">
+          <span>${d.juros_mes > 0 ? fmt(d.juros_mes) : '—'}</span>
+          <small>juros/mês</small>
+        </div>
+      </div>
+    `).join('')}
+  `
+}
+
+async function salvarMetaRenda() {
+  const alvo = parseBRL(document.getElementById('meta-alvo').value)
+  const ticket = parseBRL(document.getElementById('meta-ticket').value)
+  if (!alvo || alvo <= 0) { toast('Informe o valor da meta!', 'erro'); return }
+  try {
+    await api('/meta-renda', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familiaId: famId(), valorAlvo: alvo, ticketMedio: ticket })
+    })
+    toast(`🎯 Meta de ${fmt(alvo)} salva!`)
+    const m = await api('/meta-renda' + famQ())
+    _metaData = m
+    renderMetaDetalhe(m)
+    renderMetaRendaCard()
+  } catch(e) {
+    toast('❌ ' + e.message, 'erro')
+  }
 }
 
 // ── START ──

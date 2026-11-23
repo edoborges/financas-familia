@@ -372,9 +372,10 @@ router.get('/receitas', (req, res) => {
 
 router.post('/receitas', (req, res) => {
   try {
-    const { usuarioId, valor, descricao, dataReceita } = req.body
+    const { usuarioId, valor, descricao, dataReceita, tipo } = req.body
     if (!usuarioId || !valor) return res.status(400).json({ erro: 'Dados incompletos' })
-    const result = db.registrarReceita(usuarioId, valor, descricao || 'Receita', dataReceita || null)
+    const tipoNorm = String(tipo || 'outro').trim().toLowerCase()
+    const result = db.registrarReceita(usuarioId, valor, descricao || 'Receita', dataReceita || null, tipoNorm)
     res.json({ id: Number(result.lastInsertRowid) })
   } catch (e) {
     console.error('POST /receitas erro:', e.message)
@@ -683,6 +684,35 @@ router.post('/recorrentes/processar', (req, res) => {
     const { familiaId, usuarioId } = req.body
     const criados = db.processarRecorrentes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null)
     res.json({ criados })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+// ===== META DE RENDA =====
+router.get('/meta-renda', (req, res) => {
+  try {
+    const { familiaId, usuarioId, mes, ano } = req.query
+    res.json(db.calcularMetaRenda(
+      familiaId ? parseInt(familiaId) : null,
+      usuarioId ? parseInt(usuarioId) : null,
+      mes ? parseInt(mes) : null,
+      ano ? parseInt(ano) : null
+    ))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.post('/meta-renda', (req, res) => {
+  try {
+    const { familiaId, valorAlvo, ticketMedio } = req.body
+    if (!valorAlvo) return res.status(400).json({ erro: 'Informe o valor da meta' })
+    db.salvarMetaRenda(familiaId ? parseInt(familiaId) : 1, parseFloat(valorAlvo), parseFloat(ticketMedio) || 0)
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.get('/dividas/custo', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.query
+    res.json(db.custoDividas(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 

@@ -15,6 +15,7 @@ try { db.exec("ALTER TABLE gastos ADD COLUMN grupo_parcela INTEGER") } catch(e) 
 try { db.exec("ALTER TABLE gastos ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
 try { db.exec("ALTER TABLE gastos ADD COLUMN recorrente_id INTEGER") } catch(e) {}
 try { db.exec("ALTER TABLE receitas ADD COLUMN origem TEXT DEFAULT 'manual'") } catch(e) {}
+try { db.exec("ALTER TABLE receitas ADD COLUMN tipo TEXT DEFAULT 'outro'") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN familia_id INTEGER DEFAULT 1") } catch(e) {}
 try { db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'membro'") } catch(e) {}
 
@@ -165,6 +166,14 @@ db.exec(`
     ativa INTEGER DEFAULT 1,
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS meta_renda (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL UNIQUE,
+    valor_alvo REAL NOT NULL DEFAULT 20000,
+    ticket_medio REAL DEFAULT 0,
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `)
 
@@ -351,9 +360,9 @@ function gastosPorMes(meses = 6, familiaId = null, usuarioId = null) {
 }
 
 // ===== RECEITAS =====
-function registrarReceita(usuarioId, valor, descricao = 'Salário', dataReceita = null) {
+function registrarReceita(usuarioId, valor, descricao = 'Salário', dataReceita = null, tipo = 'outro') {
   const data = dataReceita || new Date().toISOString().split('T')[0]
-  return db.prepare('INSERT INTO receitas (usuario_id, valor, descricao, data_receita) VALUES (?, ?, ?, ?)').run(usuarioId, valor, descricao, data)
+  return db.prepare('INSERT INTO receitas (usuario_id, valor, descricao, data_receita, tipo) VALUES (?, ?, ?, ?, ?)').run(usuarioId, valor, descricao, data, tipo)
 }
 function listarReceitas(familiaId = null, usuarioId = null) {
   if (usuarioId) return db.prepare('SELECT r.*, u.nome as usuario_nome FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE r.usuario_id = ? ORDER BY r.data_receita DESC').all(usuarioId)
@@ -499,6 +508,134 @@ function totalDividas(familiaId = null) {
   }
   const result = db.prepare("SELECT COALESCE(SUM(valor_total - valor_pago), 0) as total FROM emprestimos WHERE status = 'ativo'").get()
   return Number(result.total)
+}
+
+// ===== META DE RENDA =====
+function obterMetaRenda(familiaId = null) {
+  const fid = familiaId || 1
+  const row = db.prepare('SELECT * FROM meta_renda WHERE familia_id = ?').get(fid)
+  return row || { familia_id: fid, valor_alvo: 20000, ticket_medio: 0 }
+}
+
+function salvarMetaRenda(familiaId, valorAlvo, ticketMedio) {
+  const fid = familiaId || 1
+  const ex = db.prepare('SELECT id FROM meta_renda WHERE familia_id = ?').get(fid)
+  if (ex) return db.prepare('UPDATE meta_renda SET valor_alvo = ?, ticket_medio = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?').run(valorAlvo, ticketMedio || 0, ex.id)
+  return db.prepare('INSERT INTO meta_renda (familia_id, valor_alvo, ticket_medio) VALUES (?, ?, ?)').run(fid, valorAlvo, ticketMedio || 0)
+}
+
+// Separa a renda programada em fixa (mensal/quinzenal) e semanal — a semanal varia
+// com o número de ocorrências do dia da semana no mês.
+function rendaProgramadaDetalhe(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const now = new Date()
+  const m = mes || (now.getMonth() + 1)
+  const a = ano || now.getFullYear()
+  let programadas
+  if (usuarioId) {
+    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE usuario_id = ? AND ativa = 1').all(usuarioId)
+  } else if (familiaId) {
+    programadas = db.prepare('SELECT rp.* FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? AND rp.ativa = 1').all(familiaId)
+  } else {
+    programadas = db.prepare('SELECT * FROM receitas_programadas WHERE ativa = 1').all()
+  }
+  let fixa = 0, semanal = 0
+  for (const rp of programadas) {
+    const v = Number(rp.valor)
+    if (rp.tipo === 'semanal') {
+      const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
+      semanal += v * contarDiasSemanaMes(a, m, ds)
+    } else if (rp.tipo === 'quinzenal') {
+      fixa += v * 2
+    } else {
+      fixa += v
+    }
+  }
+  return { fixa, semanal, total: fixa + semanal }
+}
+
+function receitasAgrupadasPorTipo(familiaId = null, usuarioId = null, mesStr) {
+  if (usuarioId) {
+    return db.prepare(`SELECT COALESCE(NULLIF(tipo, ''), 'outro') as tipo, COUNT(*) as qtd, COALESCE(SUM(valor), 0) as total FROM receitas WHERE usuario_id = ? AND strftime('%Y-%m', data_receita) = ? GROUP BY 1`).all(usuarioId, mesStr)
+  }
+  if (familiaId) {
+    return db.prepare(`SELECT COALESCE(NULLIF(r.tipo, ''), 'outro') as tipo, COUNT(*) as qtd, COALESCE(SUM(r.valor), 0) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_receita) = ? GROUP BY 1`).all(familiaId, mesStr)
+  }
+  return db.prepare(`SELECT COALESCE(NULLIF(tipo, ''), 'outro') as tipo, COUNT(*) as qtd, COALESCE(SUM(valor), 0) as total FROM receitas WHERE strftime('%Y-%m', data_receita) = ? GROUP BY 1`).all(mesStr)
+}
+
+function historicoAtendimentos(familiaId = null, usuarioId = null, meses = 6) {
+  if (usuarioId) {
+    return db.prepare(`SELECT strftime('%Y-%m', data_receita) as mes, COUNT(*) as qtd, COALESCE(SUM(valor), 0) as total FROM receitas WHERE usuario_id = ? AND tipo = 'atendimento' GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(usuarioId, meses)
+  }
+  if (familiaId) {
+    return db.prepare(`SELECT strftime('%Y-%m', r.data_receita) as mes, COUNT(*) as qtd, COALESCE(SUM(r.valor), 0) as total FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND r.tipo = 'atendimento' GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(familiaId, meses)
+  }
+  return db.prepare(`SELECT strftime('%Y-%m', data_receita) as mes, COUNT(*) as qtd, COALESCE(SUM(valor), 0) as total FROM receitas WHERE tipo = 'atendimento' GROUP BY mes ORDER BY mes DESC LIMIT ?`).all(meses)
+}
+
+// O núcleo do módulo: quanto falta para a meta e quantos atendimentos isso significa.
+function calcularMetaRenda(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const now = new Date()
+  const m = mes || (now.getMonth() + 1)
+  const a = ano || now.getFullYear()
+  const mesStr = `${a}-${String(m).padStart(2, '0')}`
+  const mesCorrente = m === (now.getMonth() + 1) && a === now.getFullYear()
+
+  const meta = obterMetaRenda(familiaId)
+  const alvo = Number(meta.valor_alvo) || 0
+  const prog = rendaProgramadaDetalhe(familiaId, usuarioId, m, a)
+
+  const grupos = receitasAgrupadasPorTipo(familiaId, usuarioId, mesStr)
+  const at = grupos.find(g => g.tipo === 'atendimento') || { qtd: 0, total: 0 }
+  const atendimentos = { qtd: Number(at.qtd), total: Number(at.total) }
+  const outras = grupos
+    .filter(g => g.tipo !== 'atendimento')
+    .reduce((acc, g) => acc + Number(g.total), 0)
+
+  // Ticket: o informado manualmente vence; senão a média real do histórico.
+  const historico = historicoAtendimentos(familiaId, usuarioId, 6)
+  const histQtd = historico.reduce((acc, h) => acc + Number(h.qtd), 0)
+  const histTotal = historico.reduce((acc, h) => acc + Number(h.total), 0)
+  const ticketReal = histQtd > 0 ? histTotal / histQtd : 0
+  const ticket = Number(meta.ticket_medio) > 0 ? Number(meta.ticket_medio) : ticketReal
+
+  const realizado = prog.fixa + prog.semanal + atendimentos.total + outras
+  const gap = Math.max(0, alvo - realizado)
+  const pct = alvo > 0 ? Math.min(100, (realizado / alvo) * 100) : 0
+
+  const diasNoMes = new Date(a, m, 0).getDate()
+  const diasRestantes = mesCorrente ? Math.max(0, diasNoMes - now.getDate()) : diasNoMes
+  const semanasRestantes = Math.max(1, Math.ceil(diasRestantes / 7))
+
+  const atendimentosNecessarios = ticket > 0 ? Math.ceil(gap / ticket) : null
+  const porSemana = atendimentosNecessarios != null ? Math.ceil(atendimentosNecessarios / semanasRestantes) : null
+
+  // Melhor mês do histórico serve de régua: a meta semanal é factível ou fantasia?
+  const melhorMes = historico.reduce((max, h) => Math.max(max, Number(h.qtd)), 0)
+
+  return {
+    mes: mesStr, alvo, realizado, gap, pct,
+    fontes: { fixa: prog.fixa, semanal: prog.semanal, atendimentos: atendimentos.total, outras },
+    atendimentos, ticket, ticketReal, ticketManual: Number(meta.ticket_medio) || 0,
+    atendimentosNecessarios, porSemana, diasRestantes, semanasRestantes,
+    historico, melhorMes
+  }
+}
+
+// Ranking de dívidas pelo que cada uma custa por mês em juros — qual atacar primeiro.
+function custoDividas(familiaId = null, usuarioId = null) {
+  const emps = listarEmprestimos(familiaId, usuarioId)
+  return emps.map(e => {
+    const saldo = Math.max(0, Number(e.valor_total) - Number(e.valor_pago))
+    const taxa = Number(e.taxa_juros) || 0
+    return {
+      id: e.id, descricao: e.descricao, credor: e.credor, tipo: e.tipo,
+      usuario_nome: e.usuario_nome, taxa_juros: taxa, saldo,
+      parcela_mensal: Number(e.parcela_mensal) || 0,
+      parcelas_restantes: Math.max(0, Number(e.total_parcelas) - Number(e.parcelas_pagas)),
+      juros_mes: saldo * (taxa / 100)
+    }
+  }).sort((x, y) => y.juros_mes - x.juros_mes)
 }
 
 // ===== RESUMO POR FAMÍLIA =====
@@ -668,5 +805,6 @@ module.exports = {
   alertasVencimento,
   listarOrcamentos, salvarOrcamento, deletarOrcamento,
   listarRecorrentes, salvarRecorrente, atualizarRecorrente, deletarRecorrente, processarRecorrentes,
+  obterMetaRenda, salvarMetaRenda, calcularMetaRenda, custoDividas,
   resumoFinanceiro
 }

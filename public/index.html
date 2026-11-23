@@ -167,6 +167,9 @@
         </div>
       </div>
 
+      <!-- Meta de renda mensal -->
+      <div id="meta-renda-card" class="meta-card" onclick="abrirModalMetaRenda()"></div>
+
       <!-- Score de saúde financeira -->
       <div id="saude-score-card" class="saude-card" onclick="abrirDetalhesSaude()"></div>
 
@@ -694,6 +697,33 @@
     <h3 id="res-titulo">📊 Resultado da Análise</h3>
     <div id="res-conteudo" class="res-conteudo"></div>
     <div class="modal-btns" id="res-btns" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL META DE RENDA ══ -->
+<div id="modal-meta-renda" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-meta-renda')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🎯 Meta de Renda</h3>
+    <p class="modal-desc">Quanto falta para fechar o mês e o que isso significa em atendimentos.</p>
+    <div id="meta-detalhe"></div>
+
+    <div class="meta-config">
+      <label class="input-label">Meta mensal líquida</label>
+      <div class="input-prefix"><span>R$</span><input id="meta-alvo" type="text" inputmode="decimal" placeholder="Ex: 20.000,00" /></div>
+      <label class="input-label">Ticket médio do atendimento <span class="input-hint">(deixe 0 para usar a média real)</span></label>
+      <div class="input-prefix"><span>R$</span><input id="meta-ticket" type="text" inputmode="decimal" placeholder="Ex: 250,00" /></div>
+    </div>
+
+    <div class="section-title-row" style="margin-top:18px">
+      <span>🔥 Dívidas por custo mensal</span>
+    </div>
+    <div id="meta-dividas"></div>
+
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-meta-renda')">Fechar</button>
+      <button class="btn-confirm" onclick="salvarMetaRenda()">Salvar meta</button>
+    </div>
   </div>
 </div>
 
