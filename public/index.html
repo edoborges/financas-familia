@@ -8,6 +8,8 @@
   <meta name="theme-color" content="#07091a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Finanças">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -169,6 +171,13 @@
 
       <!-- Meta de renda mensal -->
       <div id="meta-renda-card" class="mr-card" onclick="abrirModalMetaRenda()"></div>
+
+      <!-- Contas a pagar: atrasadas, de hoje e dos próximos 7 dias -->
+      <div class="section-title-row">
+        <span>📌 Contas a pagar</span>
+        <button id="btn-avisos" class="ver-tudo" onclick="abrirModalPush()">🔔 Avisos</button>
+      </div>
+      <div id="contas-pagar-section" class="contas-pagar-section"></div>
 
       <!-- Score de saúde financeira -->
       <div id="saude-score-card" class="saude-card" onclick="abrirDetalhesSaude()"></div>
@@ -723,6 +732,17 @@
     <h3 id="res-titulo">📊 Resultado da Análise</h3>
     <div id="res-conteudo" class="res-conteudo"></div>
     <div class="modal-btns" id="res-btns" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ══ MODAL AVISOS (PUSH) ══ -->
+<div id="modal-push" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-push')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🔔 Avisos no celular</h3>
+    <p class="modal-desc">O app avisa 2 dias antes de cada conta vencer, no dia do vencimento, se uma conta passar do dia sem estar marcada como paga, e quando um orçamento chegar a 80% ou estourar. Só entre 8h e 21h.</p>
+    <div id="push-conteudo"></div>
+    <button class="btn-cancel" style="width:100%;margin-top:10px" onclick="fecharModal('modal-push')">Fechar</button>
   </div>
 </div>
 

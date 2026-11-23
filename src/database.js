@@ -164,6 +164,38 @@ db.exec(`
     ticket_medio REAL DEFAULT 0,
     atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS config (
+    chave TEXT PRIMARY KEY,
+    valor TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS push_inscricoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    dispositivo TEXT,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  );
+
+  -- Uma conta (fatura, parcela, gasto fixo) num vencimento é identificada por 'chave',
+  -- ex.: 'fatura:2:2026-12-05', 'recorrente:7:2026-12', 'emprestimo:3:2026-12'.
+  CREATE TABLE IF NOT EXISTS pagamentos (
+    chave TEXT PRIMARY KEY,
+    usuario_id INTEGER,
+    pago_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS notificacoes_enviadas (
+    usuario_id INTEGER NOT NULL,
+    chave TEXT NOT NULL,
+    tipo TEXT NOT NULL,
+    enviado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (usuario_id, chave, tipo)
+  );
 `)
 
 // Migrações seguras. Precisam rodar DEPOIS do CREATE TABLE: num banco novo, um ALTER
@@ -638,6 +670,60 @@ function custoDividas(familiaId = null, usuarioId = null) {
   }).sort((x, y) => y.juros_mes - x.juros_mes)
 }
 
+// ===== DATA, CONFIG, PAGAMENTOS E PUSH =====
+// "Hoje" no fuso do Brasil. O servidor do Railway roda em UTC: entre 21h e meia-noite o
+// "hoje" dele já é amanhã, o que adiantaria vencimentos e lembretes em um dia.
+function hojeBR() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })  // AAAA-MM-DD
+}
+function somaDias(dataStr, n) {
+  const [y, m, d] = dataStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
+function obterConfig(chave) {
+  return db.prepare('SELECT valor FROM config WHERE chave = ?').get(chave)?.valor ?? null
+}
+function salvarConfig(chave, valor) {
+  return db.prepare('INSERT INTO config (chave, valor) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor').run(chave, String(valor))
+}
+
+// O "paguei" vale do dia em que o recurso entrou no ar em diante. Conta vencida antes disso
+// conta como paga — senão o app começaria cobrando contas antigas que já foram quitadas.
+if (!obterConfig('pagamentos_desde')) salvarConfig('pagamentos_desde', hojeBR())
+
+function chavesPagas() {
+  return new Set(db.prepare('SELECT chave FROM pagamentos').all().map(r => r.chave))
+}
+function marcarPago(chave, usuarioId = null) {
+  return db.prepare('INSERT OR IGNORE INTO pagamentos (chave, usuario_id) VALUES (?, ?)').run(chave, usuarioId)
+}
+function desmarcarPago(chave) {
+  return db.prepare('DELETE FROM pagamentos WHERE chave = ?').run(chave)
+}
+
+// O mesmo aparelho pode trocar de usuário (Ed sai, Leide entra): o endpoint é a identidade.
+function salvarInscricaoPush(usuarioId, inscricao, dispositivo = null) {
+  return db.prepare(`INSERT INTO push_inscricoes (usuario_id, endpoint, p256dh, auth, dispositivo) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET usuario_id = excluded.usuario_id, p256dh = excluded.p256dh, auth = excluded.auth, dispositivo = excluded.dispositivo`)
+    .run(usuarioId, inscricao.endpoint, inscricao.keys.p256dh, inscricao.keys.auth, dispositivo)
+}
+function listarInscricoesPush(usuarioId) {
+  return db.prepare('SELECT * FROM push_inscricoes WHERE usuario_id = ?').all(usuarioId)
+}
+function removerInscricaoPush(endpoint) {
+  return db.prepare('DELETE FROM push_inscricoes WHERE endpoint = ?').run(endpoint)
+}
+function usuariosComPush() {
+  return db.prepare('SELECT DISTINCT usuario_id FROM push_inscricoes').all().map(r => r.usuario_id)
+}
+function jaNotificado(usuarioId, chave, tipo) {
+  return !!db.prepare('SELECT 1 FROM notificacoes_enviadas WHERE usuario_id = ? AND chave = ? AND tipo = ?').get(usuarioId, chave, tipo)
+}
+function registrarNotificacao(usuarioId, chave, tipo) {
+  return db.prepare('INSERT OR IGNORE INTO notificacoes_enviadas (usuario_id, chave, tipo) VALUES (?, ?, ?)').run(usuarioId, chave, tipo)
+}
+
 // ===== CALENDÁRIO DO MÊS =====
 function _porEscopo(sqlUsuario, sqlFamilia, sqlTodos, usuarioId, familiaId, ...params) {
   if (usuarioId) return db.prepare(sqlUsuario).all(usuarioId, ...params)
@@ -680,8 +766,8 @@ function _recorrentesAtivos(familiaId, usuarioId) {
 // Gastos fixos ainda não lançados no mês viram previsão — mas só do mês atual em diante:
 // num mês passado, o que não foi lançado não foi cobrado.
 function _recorrentesPendentes(familiaId, usuarioId, y, m, gastosDoMes) {
-  const now = new Date()
-  if (y * 12 + m < now.getFullYear() * 12 + now.getMonth() + 1) return []
+  const [hy, hm] = hojeBR().split('-').map(Number)
+  if (y * 12 + m < hy * 12 + hm) return []
   const lancados = new Set(gastosDoMes.filter(g => g.recorrente_id).map(g => g.recorrente_id))
   const ultimo = new Date(y, m, 0).getDate()
   return _recorrentesAtivos(familiaId, usuarioId)
@@ -713,7 +799,7 @@ function _faturasDoMes(familiaId, usuarioId, y, m, cartoes) {
   return [...grupos.values()].map(f => ({
     data: f.data, tipo: 'saida', descricao: `Fatura ${f.cartao.nome}`,
     valor: +f.compras.reduce((acc, c) => acc + c.valor, 0).toFixed(2),
-    categoria: 'Fatura', fonte: 'fatura',
+    categoria: 'Fatura', fonte: 'fatura', conta: true, chave: `fatura:${f.cartao.id}:${f.data}`,
     compras: f.compras.sort((a, b) => a.data.localeCompare(b.data))
   }))
 }
@@ -732,14 +818,20 @@ function itensCalendario(familiaId, usuarioId, m, a) {
     return c ? { informativo: true, cartao: c.nome, vencimentoFatura: vencimentoFatura(data, c.dia_fechamento, c.dia_vencimento) } : {}
   }
 
+  // Contas a pagar (gasto fixo fora do cartão, fatura, parcela) levam uma chave estável:
+  // é por ela que o "paguei" e os lembretes reconhecem a mesma conta, lançada ou não.
+  const contaFixa = (recorrenteId) => ({ conta: true, chave: `recorrente:${recorrenteId}:${mesStr}` })
+
   const gastos = _gastosDoMes(familiaId, usuarioId, mesStr)
   for (const g of gastos) {
     const data = String(g.data_gasto).slice(0, 10)
-    itens.push({ data, tipo: 'saida', descricao: g.descricao, valor: Number(g.valor), categoria: g.categoria || 'Outros', fonte: g.origem === 'recorrente' ? 'recorrente' : 'gasto', ...(g.cartao_id ? infoCartao(g.cartao_id, data) : {}) })
+    const extra = g.cartao_id ? infoCartao(g.cartao_id, data) : g.recorrente_id ? contaFixa(g.recorrente_id) : {}
+    itens.push({ data, tipo: 'saida', descricao: g.descricao, valor: Number(g.valor), categoria: g.categoria || 'Outros', fonte: g.origem === 'recorrente' ? 'recorrente' : 'gasto', ...extra })
   }
 
   for (const r of _recorrentesPendentes(familiaId, usuarioId, a, m, gastos)) {
-    itens.push({ data: r.data, tipo: 'saida', descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria || 'Outros', fonte: 'recorrente', ...(r.cartao_id ? infoCartao(r.cartao_id, r.data) : {}) })
+    const extra = r.cartao_id ? infoCartao(r.cartao_id, r.data) : contaFixa(r.id)
+    itens.push({ data: r.data, tipo: 'saida', descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria || 'Outros', fonte: 'recorrente', ...extra })
   }
 
   itens.push(..._faturasDoMes(familiaId, usuarioId, a, m, cartoes))
@@ -753,7 +845,7 @@ function itensCalendario(familiaId, usuarioId, m, a) {
   for (const e of emprestimos) {
     if (!(Number(e.parcela_mensal) > 0) || !e.data_vencimento) continue
     const dia = Number(String(e.data_vencimento).slice(8, 10)) || 1
-    itens.push({ data: dataDoDia(dia), tipo: 'saida', descricao: `Parcela ${e.descricao}`, valor: Number(e.parcela_mensal), categoria: 'Financiamento', fonte: 'emprestimo' })
+    itens.push({ data: dataDoDia(dia), tipo: 'saida', descricao: `Parcela ${e.descricao}`, valor: Number(e.parcela_mensal), categoria: 'Financiamento', fonte: 'emprestimo', conta: true, chave: `emprestimo:${e.id}:${mesStr}` })
   }
 
   const receitas = _porEscopo(
@@ -783,37 +875,75 @@ function itensCalendario(familiaId, usuarioId, m, a) {
   return itens
 }
 
-// Monta a grade do mês e corre o saldo previsto dia a dia a partir do saldo de hoje.
-// O saldo das contas é o de hoje, então só o que vence depois de hoje mexe nele;
-// meses futuros começam do saldo final projetado do mês anterior.
-function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
-  const now = new Date()
-  const hojeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const m = mes || (now.getMonth() + 1)
-  const a = ano || now.getFullYear()
-  const idx = (y, mm) => y * 12 + (mm - 1)
-  const distancia = idx(a, m) - idx(now.getFullYear(), now.getMonth() + 1)
+// Status de uma conta a pagar. Paga se marcada, ou se venceu antes do "paguei" existir.
+function _statusConta(item, pagos, desde, hoje) {
+  if (!item.conta) return {}
+  const marcada = pagos.has(item.chave)
+  const pago = marcada || item.data < desde
+  return { pago, pagoAuto: pago && !marcada, atrasada: !pago && item.data < hoje }
+}
 
-  // Informativo (compra no cartão) nunca mexe em saldo nem em total: quem mexe é a fatura.
-  const conta = i => !i.informativo
+// Contas (fatura, parcela, gasto fixo) que vencem até hoje + 'dias', com status de pagamento.
+// Atrasadas entram até ~2 meses para trás (e nunca antes do "paguei" existir).
+function contasAPagar(familiaId = null, usuarioId = null, dias = 7) {
+  const hoje = hojeBR()
+  const desde = obterConfig('pagamentos_desde') || hoje
+  const doisMeses = somaDias(hoje, -62)
+  const inicio = desde > doisMeses ? desde : doisMeses
+  const limite = somaDias(hoje, dias)
+  const pagos = chavesPagas()
+  const out = []
+  let [y, m] = inicio.split('-').map(Number)
+  const [ly, lm] = limite.split('-').map(Number)
+  while (y * 12 + m <= ly * 12 + lm) {
+    for (const i of itensCalendario(familiaId, usuarioId, m, y)) {
+      if (!i.conta || i.data < inicio || i.data > limite) continue
+      out.push({ ...i, ..._statusConta(i, pagos, desde, hoje), venceHoje: i.data === hoje })
+    }
+    ;[y, m] = _somaMes(y, m, 1)
+  }
+  return out.sort((a, b) => a.data.localeCompare(b.data) || b.valor - a.valor)
+}
+
+// Monta a grade do mês e corre o saldo previsto dia a dia a partir do saldo de hoje.
+// O saldo das contas é o de hoje: o que venceu e foi pago já saiu dele; o que vence depois
+// de hoje mexe nele no dia; e conta vencida e NÃO paga ainda vai sair — entra hoje.
+// Meses futuros começam do saldo final projetado do mês anterior.
+function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const hojeStr = hojeBR()
+  const [hy, hm] = hojeStr.split('-').map(Number)
+  const m = mes || hm
+  const a = ano || hy
+  const idx = (y, mm) => y * 12 + (mm - 1)
+  const distancia = idx(a, m) - idx(hy, hm)
+  const pagos = chavesPagas()
+  const desde = obterConfig('pagamentos_desde') || hojeStr
+
+  // Compra no cartão (informativo) nunca mexe em saldo nem em total: quem mexe é a fatura.
+  // Conta paga antes do vencimento já saiu da conta bancária: não sai de novo no dia.
+  const movimenta = i => !i.informativo
+  const saiNoDia = i => movimenta(i) && !(i.conta && _statusConta(i, pagos, desde, hojeStr).pago)
   const fluxoFuturo = (y, mm) => itensCalendario(familiaId, usuarioId, mm, y)
-    .filter(i => conta(i) && i.data > hojeStr)
+    .filter(i => saiNoDia(i) && i.data > hojeStr)
     .reduce((acc, i) => acc + (i.tipo === 'entrada' ? i.valor : -i.valor), 0)
+
+  const pendentesHoje = contasAPagar(familiaId, usuarioId, 0).filter(c => !c.pago)
+  const pendentes = { qtd: pendentesHoje.length, total: pendentesHoje.reduce((acc, c) => acc + c.valor, 0) }
 
   // Saldo de abertura: hoje para o mês corrente; projeção encadeada para até 6 meses à frente.
   let saldoAbertura = null
   if (distancia >= 0 && distancia <= 6) {
-    saldoAbertura = listarContas(familiaId, usuarioId).reduce((acc, c) => acc + Number(c.saldo || 0), 0)
+    saldoAbertura = listarContas(familiaId, usuarioId).reduce((acc, c) => acc + Number(c.saldo || 0), 0) - pendentes.total
     for (let k = 0; k < distancia; k++) {
-      const t = idx(now.getFullYear(), now.getMonth() + 1) + k
-      saldoAbertura += fluxoFuturo(Math.floor(t / 12), (t % 12) + 1)
+      const [y, mm] = _somaMes(hy, hm, k)
+      saldoAbertura += fluxoFuturo(y, mm)
     }
   }
 
   const itens = itensCalendario(familiaId, usuarioId, m, a)
-    .map(i => ({ ...i, previsto: i.data > hojeStr }))
+    .map(i => ({ ...i, previsto: i.data > hojeStr, ..._statusConta(i, pagos, desde, hojeStr) }))
   const ultimoDia = new Date(a, m, 0).getDate()
-  const mesStr = `${a}-${String(m).padStart(2, '0')}`
+  const mesStr = _mesStr(a, m)
 
   let saldo = saldoAbertura
   let menor = null
@@ -821,23 +951,25 @@ function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = nul
   for (let d = 1; d <= ultimoDia; d++) {
     const data = `${mesStr}-${String(d).padStart(2, '0')}`
     const doDia = itens.filter(i => i.data === data)
-    const entradas = doDia.filter(i => conta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
-    const saidas = doDia.filter(i => conta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+    const entradas = doDia.filter(i => movimenta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+    const saidas = doDia.filter(i => movimenta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
     let saldoDia = null
     if (saldo != null && data >= hojeStr) {
-      if (data > hojeStr) saldo += entradas - saidas
+      if (data > hojeStr) {
+        saldo += doDia.filter(i => saiNoDia(i)).reduce((acc, i) => acc + (i.tipo === 'entrada' ? i.valor : -i.valor), 0)
+      }
       saldoDia = saldo
       if (!menor || saldo < menor.valor) menor = { valor: saldo, data }
     }
     dias.push({ dia: d, data, entradas, saidas, saldo: saldoDia, itens: doDia })
   }
 
-  const totalEntradas = itens.filter(i => conta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
-  const totalSaidas = itens.filter(i => conta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+  const totalEntradas = itens.filter(i => movimenta(i) && i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+  const totalSaidas = itens.filter(i => movimenta(i) && i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
   return {
     mes: m, ano: a, hoje: hojeStr,
     primeiroDiaSemana: new Date(a, m - 1, 1).getDay(),
-    dias, totalEntradas, totalSaidas,
+    dias, totalEntradas, totalSaidas, pendentes,
     saldoAbertura, saldoFinal: saldo, menorSaldo: menor
   }
 }
@@ -1020,6 +1152,8 @@ module.exports = {
   listarOrcamentos, salvarOrcamento, deletarOrcamento,
   listarRecorrentes, salvarRecorrente, atualizarRecorrente, setarAtivaRecorrente, deletarRecorrente, processarRecorrentes,
   obterMetaRenda, salvarMetaRenda, calcularMetaRenda, custoDividas,
-  calendarioMes,
+  calendarioMes, contasAPagar,
+  hojeBR, somaDias, obterConfig, salvarConfig, marcarPago, desmarcarPago,
+  salvarInscricaoPush, listarInscricoesPush, removerInscricaoPush, usuariosComPush, jaNotificado, registrarNotificacao,
   resumoFinanceiro
 }

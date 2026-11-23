@@ -729,6 +729,70 @@ router.get('/calendario', (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
+// ===== CONTAS A PAGAR E "PAGUEI" =====
+router.get('/contas-a-pagar', (req, res) => {
+  try {
+    const { familiaId, usuarioId, dias } = req.query
+    res.json(db.contasAPagar(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null, dias ? Math.min(parseInt(dias), 60) : 7))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.post('/pagamentos', (req, res) => {
+  try {
+    const { chave, usuarioId } = req.body
+    if (!chave) return res.status(400).json({ erro: 'Informe a conta' })
+    db.marcarPago(String(chave), usuarioId ? parseInt(usuarioId) : null)
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.delete('/pagamentos', (req, res) => {
+  try {
+    const { chave } = req.body
+    if (!chave) return res.status(400).json({ erro: 'Informe a conta' })
+    db.desmarcarPago(String(chave))
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+// ===== NOTIFICAÇÕES PUSH =====
+router.get('/push/chave', (req, res) => {
+  try {
+    res.json({ chave: require('./lembretes').configurarVapid() })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.post('/push/inscrever', (req, res) => {
+  try {
+    const { usuarioId, inscricao, dispositivo } = req.body
+    if (!usuarioId || !inscricao?.endpoint || !inscricao?.keys?.p256dh || !inscricao?.keys?.auth) {
+      return res.status(400).json({ erro: 'Inscrição incompleta' })
+    }
+    db.salvarInscricaoPush(parseInt(usuarioId), inscricao, dispositivo ? String(dispositivo).slice(0, 120) : null)
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.post('/push/cancelar', (req, res) => {
+  try {
+    if (req.body.endpoint) db.removerInscricaoPush(String(req.body.endpoint))
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+router.post('/push/teste', async (req, res) => {
+  try {
+    const { usuarioId } = req.body
+    if (!usuarioId) return res.status(400).json({ erro: 'Usuário não informado' })
+    const enviados = await require('./lembretes').enviarParaUsuario(parseInt(usuarioId), {
+      title: '🔔 Lembretes ativados',
+      body: 'Você vai ser avisado 2 dias antes de cada conta vencer, no dia, e se o orçamento apertar.',
+      url: '/?aba=agenda', tag: 'teste'
+    })
+    res.json({ enviados })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 router.get('/dividas/custo', (req, res) => {
   try {
     const { familiaId, usuarioId } = req.query

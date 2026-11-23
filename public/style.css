@@ -986,3 +986,40 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .rel-top-desc{font-size:.85rem;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rel-top-meta{font-size:.7rem;color:#94a3b8;display:flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}
 .rel-top-val{font-size:.88rem;font-weight:800;color:#e11d48;flex-shrink:0}
+
+/* ═══ Contas a pagar (Início) ═══ */
+.contas-pagar-section{margin-bottom:14px}
+.cp-alerta{background:#fff1f2;color:#9f1239;border-left:3px solid #e11d48;border-radius:10px;padding:9px 11px;font-size:.78rem;line-height:1.4;margin-bottom:8px}
+.cp-item{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:14px;padding:10px 12px;margin-bottom:8px;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.04);border-left:4px solid #cbd5e1}
+.cp-item.cp-atrasada{border-left-color:#e11d48;background:#fff7f8}
+.cp-item.cp-hoje{border-left-color:#f59e0b}
+.cp-item.cp-breve{border-left-color:#6366f1}
+.cp-ico{font-size:1.15rem;flex-shrink:0}
+.cp-info{flex:1;min-width:0}
+.cp-desc{font-size:.86rem;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cp-quando{font-size:.72rem;color:#94a3b8;font-weight:600}
+.cp-atrasada .cp-quando{color:#e11d48}
+.cp-hoje .cp-quando{color:#d97706}
+.cp-valor{font-size:.86rem;font-weight:800;color:var(--txt);flex-shrink:0}
+.cp-paguei{flex-shrink:0;border:none;background:#10b981;color:#fff;font-weight:800;font-size:.74rem;border-radius:9px;padding:7px 10px;cursor:pointer}
+.cp-paguei:active{transform:scale(.95)}
+.cp-paguei:disabled{opacity:.6}
+.cp-rodape{display:flex;justify-content:space-between;font-size:.74rem;color:#64748b;padding:2px 4px;cursor:pointer}
+.cp-rodape b{color:var(--txt)}
+.btn-avisos-on{color:#059669 !important}
+
+/* ═══ Avisos (modal) ═══ */
+.push-passos{background:#f8fafc;border-radius:12px;padding:12px 14px;font-size:.84rem;color:#334155;line-height:1.5}
+.push-passos ol,.push-passos ul{margin:8px 0 6px 18px;padding:0}
+.push-passos li{margin-bottom:4px}
+.push-passos small{color:#64748b}
+.push-ico{display:inline-block;background:#e0e7ff;border-radius:6px;padding:0 4px}
+.push-ok{background:#f0fdf4;color:#166534;border-radius:12px;padding:12px 14px;font-size:.86rem;font-weight:700}
+
+/* ═══ Paguei na Agenda ═══ */
+.cal-item-dir{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0}
+.cal-tag-pago{color:#059669;font-weight:800}
+.cal-tag-atrasada{color:#e11d48;font-weight:800}
+.cal-desfazer{border:none;background:none;color:#94a3b8;font-size:.7rem;text-decoration:underline;cursor:pointer;padding:0}
+.cal-item-pago{opacity:.7}
+.cal-alerta-pend{background:#fff7ed;color:#9a3412;border-left-color:#f59e0b}

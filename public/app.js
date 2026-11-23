@@ -336,6 +336,8 @@ async function mostrarApp() {
 
   carregarInicio()
   processarRecorrentesAuto()
+  sincronizarPush()
+  tratarLinkInicial()
   addMsgBot(`${SAUDACOES()}, ${usuario.nome}! 👋\n\nDigite um gasto aqui. Exemplos:\n• "Mercado R$150"\n• "Gasolina R$80 débito"\n• "Farmácia R$45 Nubank"\n\nOu mande "ajuda" para ver todos os comandos.`)
 }
 
@@ -384,8 +386,9 @@ async function carregarInicio() {
     const score = calcularScore(resumo, orcs, cats)
     renderScoreCard(score)
 
-    // Meta de renda
+    // Meta de renda e contas a pagar
     renderMetaRendaCard()
+    renderContasPagar()
 
     // Patrimônio líquido
     renderPatrimonio(resumo)
@@ -2942,6 +2945,7 @@ async function salvarMetaRenda() {
 // ══════════════════════════════════════════
 const NOMES_MES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 let calMes = null, calAno = null, calDados = null, calDiaSel = null
+let calDiaForcado = null  // dia pedido por um link (toque numa notificação)
 
 async function carregarAgenda() {
   if (!calMes) {
@@ -2954,9 +2958,11 @@ async function carregarAgenda() {
   try {
     calDados = await api(`/calendario?mes=${calMes}&ano=${calAno}${famQAnd()}`)
     // Abre no dia de hoje se o mês for o corrente; senão no primeiro dia com movimento.
+    const forcado = calDiaForcado && calDados.dias.find(d => d.data === calDiaForcado)
+    calDiaForcado = null
     const hojeNoMes = calDados.dias.find(d => d.data === calDados.hoje)
     const primeiroComItem = calDados.dias.find(d => d.itens.length)
-    calDiaSel = (hojeNoMes || primeiroComItem || calDados.dias[0]).data
+    calDiaSel = (forcado || hojeNoMes || primeiroComItem || calDados.dias[0]).data
     renderCalendario()
   } catch(e) {
     document.getElementById('cal-dias').innerHTML = `<div class="cal-carregando">Erro: ${e.message}</div>`
@@ -3016,11 +3022,16 @@ function renderCalResumo(c) {
       : c.menorSaldo
         ? `<div class="cal-ok">✅ Fecha no azul. Ponto mais baixo: ${fmt(c.menorSaldo.valor)} em ${dataMenor}</div>`
         : ''
+    // Conta vencida e não marcada ainda vai sair da conta bancária: o saldo já a desconta hoje.
+    const pend = c.pendentes && c.pendentes.qtd
+      ? `<div class="cal-alerta cal-alerta-pend">💸 ${c.pendentes.qtd} ${c.pendentes.qtd === 1 ? 'conta vencida ou vencendo hoje' : 'contas vencidas ou vencendo hoje'} sem marcar como paga (${fmt(c.pendentes.total)}). O saldo previsto já desconta. Pagou? Marque <b>Paguei</b>.</div>`
+      : ''
     saldoHtml = `
       <div class="cal-saldo-linha">
         <span>Saldo previsto no fim do mês</span>
         <b style="color:${corFinal}">${fmt(c.saldoFinal)}</b>
       </div>
+      ${pend}
       ${alerta}`
   } else {
     saldoHtml = `<div class="cal-saldo-linha cal-saldo-info"><span>Saldo previsto só aparece do mês atual em diante</span></div>`
@@ -3065,16 +3076,36 @@ function renderDiaDetalhe() {
           let meta = `${entrada ? 'Entrada' : i.categoria}${fonte ? ' · ' + fonte : ''}`
           if (i.informativo) meta += ` · 💳 ${i.cartao}, sai na fatura de ${ddmm(i.vencimentoFatura)}`
           if (i.fonte === 'fatura') meta = `${i.compras.length} ${i.compras.length === 1 ? 'compra' : 'compras'}`
-          if (i.previsto) meta += ' · <span class="cal-tag-prev">previsto</span>'
+          // Conta a pagar: status e botão. Paga só por ser anterior ao "paguei" não ganha
+          // "desfazer" — não há marcação para desfazer.
+          let acao = ''
+          if (i.conta && !i.pagoAuto) {
+            // Dentro do <summary> da fatura, o clique no botão não pode abrir/fechar a lista.
+            const pare = 'event.preventDefault();event.stopPropagation();'
+            if (i.pago) {
+              meta += ' · <span class="cal-tag-pago">✓ paga</span>'
+              acao = `<button class="cal-desfazer" onclick="${pare}desfazerPaguei('${i.chave}')">desfazer</button>`
+            } else {
+              if (i.atrasada) meta += ' · <span class="cal-tag-atrasada">vencida</span>'
+              else if (!i.previsto) meta += ' · <span class="cal-tag-atrasada">vence hoje</span>'
+              else meta += ' · <span class="cal-tag-prev">previsto</span>'
+              acao = `<button class="cp-paguei" onclick="${pare}marcarPaguei('${i.chave}', this)">Paguei</button>`
+            }
+          } else if (i.previsto) {
+            meta += ' · <span class="cal-tag-prev">previsto</span>'
+          }
 
           const corValor = entrada ? '#10b981' : i.informativo ? '#94a3b8' : '#e11d48'
-          const linha = `<div class="cal-item${i.informativo ? ' cal-item-info-cartao' : ''}" style="border-left-color:${cor}">
+          const linha = `<div class="cal-item${i.informativo ? ' cal-item-info-cartao' : ''}${i.conta && i.pago && !i.pagoAuto ? ' cal-item-pago' : ''}" style="border-left-color:${cor}">
             <span class="cal-item-ico">${icone}</span>
             <div class="cal-item-info">
               <div class="cal-item-desc">${i.descricao}</div>
               <div class="cal-item-meta">${meta}</div>
             </div>
-            <b class="cal-item-val" style="color:${corValor}">${entrada ? '+' : '−'}${fmt(i.valor)}</b>
+            <div class="cal-item-dir">
+              <b class="cal-item-val" style="color:${corValor}">${entrada ? '+' : '−'}${fmt(i.valor)}</b>
+              ${acao}
+            </div>
           </div>`
 
           if (i.fonte !== 'fatura') return linha
@@ -3096,6 +3127,240 @@ function renderDiaDetalhe() {
     <div class="section-title-row"><span>${semana}, ${dia}/${m}</span></div>
     ${itens}
     ${saldo}`
+}
+
+// ══════════════════════════════════════════
+//  CONTAS A PAGAR + "PAGUEI"
+// ══════════════════════════════════════════
+const ddmmStr = data => data.slice(8, 10) + '/' + data.slice(5, 7)
+
+function quandoVence(data, hoje) {
+  const dias = Math.round((new Date(data + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 86400000)
+  if (dias < 0) return { txt: `venceu ${ddmmStr(data)}`, classe: 'cp-atrasada' }
+  if (dias === 0) return { txt: 'vence hoje', classe: 'cp-hoje' }
+  if (dias === 1) return { txt: 'amanhã', classe: 'cp-breve' }
+  if (dias <= 2) return { txt: `em ${dias} dias`, classe: 'cp-breve' }
+  return { txt: ddmmStr(data), classe: '' }
+}
+
+async function renderContasPagar() {
+  const el = document.getElementById('contas-pagar-section')
+  if (!el) return
+  atualizarBotaoAvisos()
+  try {
+    const contas = await api('/contas-a-pagar' + famQ())
+    // Mesmo fuso que o servidor usa para decidir o que está atrasado.
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+    const abertas = contas.filter(c => !c.pago)
+    const pagas = contas.filter(c => c.pago && c.data >= hoje)
+    if (!abertas.length) {
+      el.innerHTML = `<div class="orc-vazio" onclick="mostrarAba('agenda');navBtn('nav-agenda')">
+        <span>🎉</span><span>Nada vencendo nos próximos 7 dias${pagas.length ? ` · ${pagas.length} já ${pagas.length === 1 ? 'paga' : 'pagas'}` : ''}</span>
+      </div>`
+      return
+    }
+    const totalAberto = abertas.reduce((acc, c) => acc + c.valor, 0)
+    const atrasadas = abertas.filter(c => c.atrasada)
+    el.innerHTML = `
+      ${atrasadas.length ? `<div class="cp-alerta">⚠️ ${atrasadas.length} ${atrasadas.length === 1 ? 'conta vencida' : 'contas vencidas'} sem marcar como paga. Já pagou? Toque em <b>Paguei</b>.</div>` : ''}
+      ${abertas.slice(0, 6).map(c => {
+        const q = quandoVence(c.data, hoje)
+        const icone = c.fonte === 'fatura' ? '💳' : (EMOJI_CAT[c.categoria] || '📦')
+        return `<div class="cp-item ${q.classe}">
+          <span class="cp-ico">${icone}</span>
+          <div class="cp-info">
+            <div class="cp-desc">${c.descricao}</div>
+            <div class="cp-quando">${q.txt}</div>
+          </div>
+          <b class="cp-valor">${fmt(c.valor)}</b>
+          <button class="cp-paguei" onclick="marcarPaguei('${c.chave}', this)">Paguei</button>
+        </div>`
+      }).join('')}
+      <div class="cp-rodape" onclick="mostrarAba('agenda');navBtn('nav-agenda')">
+        <span>${abertas.length > 6 ? `+${abertas.length - 6} contas · ` : ''}Total em aberto: <b>${fmt(totalAberto)}</b></span>
+        <span>Ver na agenda ›</span>
+      </div>`
+  } catch(e) {
+    el.innerHTML = `<div class="orc-vazio">Não foi possível carregar as contas</div>`
+  }
+}
+
+async function marcarPaguei(chave, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '…' }
+  try {
+    await api('/pagamentos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave, usuarioId: usuario.id }) })
+    toast('✅ Marcada como paga')
+    renderContasPagar()
+    if (document.getElementById('aba-agenda').style.display !== 'none') carregarAgenda()
+  } catch(e) {
+    toast('❌ ' + e.message, 'erro')
+    if (btn) { btn.disabled = false; btn.textContent = 'Paguei' }
+  }
+}
+
+async function desfazerPaguei(chave) {
+  try {
+    await api('/pagamentos', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave }) })
+    toast('↩️ Voltou a ficar em aberto')
+    renderContasPagar()
+    if (document.getElementById('aba-agenda').style.display !== 'none') carregarAgenda()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ══════════════════════════════════════════
+//  AVISOS (WEB PUSH)
+// ══════════════════════════════════════════
+const ehIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+const appInstalado = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+const pushSuportado = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+const descreverAparelho = () => ehIOS() ? 'iPhone' : /Android/i.test(navigator.userAgent) ? 'Android' : 'Navegador'
+
+// No iPhone o push só existe com o app aberto pela tela inicial (iOS 16.4+);
+// no Safari comum o PushManager nem aparece, então essa checagem vem primeiro.
+async function estadoPush() {
+  if (ehIOS() && !appInstalado()) return 'precisa-instalar'
+  if (!pushSuportado()) return 'sem-suporte'
+  if (Notification.permission === 'denied') return 'negado'
+  try {
+    const reg = await navigator.serviceWorker.ready
+    return (await reg.pushManager.getSubscription()) ? 'ativo' : 'inativo'
+  } catch(e) { return 'inativo' }
+}
+
+async function atualizarBotaoAvisos() {
+  const btn = document.getElementById('btn-avisos')
+  if (!btn) return
+  const estado = await estadoPush()
+  btn.textContent = estado === 'ativo' ? '🔔 Avisos ✓' : '🔔 Ativar avisos'
+  btn.classList.toggle('btn-avisos-on', estado === 'ativo')
+}
+
+async function abrirModalPush() {
+  document.getElementById('modal-push').style.display = 'flex'
+  const el = document.getElementById('push-conteudo')
+  const estado = await estadoPush()
+  const telas = {
+    'precisa-instalar': `
+      <div class="push-passos">
+        <b>No iPhone, os avisos só funcionam com o app na tela inicial:</b>
+        <ol>
+          <li>Abra este endereço no <b>Safari</b></li>
+          <li>Toque em <b>Compartilhar</b> <span class="push-ico">⬆️</span> na barra de baixo</li>
+          <li>Escolha <b>Adicionar à Tela de Início</b> e confirme</li>
+          <li>Abra o app <b>pelo ícone</b> novo e toque em 🔔 de novo</li>
+        </ol>
+        <small>Precisa do iOS 16.4 ou mais novo (Ajustes → Geral → Sobre).</small>
+      </div>`,
+    'sem-suporte': `<div class="push-passos">Este navegador não aceita avisos. No Android, abra o app pelo <b>Chrome</b>.</div>`,
+    'negado': `
+      <div class="push-passos">
+        <b>Os avisos foram bloqueados neste aparelho.</b> Para liberar:
+        <ul>
+          <li><b>iPhone:</b> Ajustes → Notificações → Finanças → Permitir</li>
+          <li><b>Android:</b> segure o ícone do app → ⓘ Informações → Notificações</li>
+        </ul>
+        Depois volte aqui e toque em ativar.
+      </div>`,
+    'inativo': `<button class="btn-confirm btn-verde" style="width:100%" onclick="ativarPush(this)">🔔 Ativar avisos neste aparelho</button>`,
+    'ativo': `
+      <div class="push-ok">✅ Avisos ativos neste aparelho (${descreverAparelho()})</div>
+      <div class="modal-btns">
+        <button class="btn-cancel" onclick="desativarPush()">Desativar</button>
+        <button class="btn-confirm" onclick="testarPush(this)">Enviar teste</button>
+      </div>`
+  }
+  el.innerHTML = telas[estado]
+}
+
+function base64UrlParaBytes(base64) {
+  const pad = '='.repeat((4 - base64.length % 4) % 4)
+  const bin = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from(bin, c => c.charCodeAt(0))
+}
+
+async function ativarPush(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Ativando…' }
+  try {
+    // O pedido de permissão tem de ser a primeira coisa após o toque: o Safari recusa
+    // se houver uma chamada de rede antes.
+    const permissao = await Notification.requestPermission()
+    if (permissao !== 'granted') { await abrirModalPush(); return }
+    const { chave } = await api('/push/chave')
+    const reg = await navigator.serviceWorker.ready
+    const inscricao = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlParaBytes(chave) })
+    await api('/push/inscrever', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, inscricao: inscricao.toJSON(), dispositivo: descreverAparelho() })
+    })
+    await testarPush()
+    await abrirModalPush()
+    atualizarBotaoAvisos()
+  } catch(e) {
+    toast('❌ Não foi possível ativar: ' + e.message, 'erro')
+    if (btn) { btn.disabled = false; btn.textContent = '🔔 Ativar avisos neste aparelho' }
+  }
+}
+
+async function testarPush(btn) {
+  if (btn) btn.disabled = true
+  try {
+    const { enviados } = await api('/push/teste', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id }) })
+    toast(enviados ? '🔔 Aviso de teste enviado' : '⚠️ Nenhum aparelho recebeu — tente ativar de novo', enviados ? undefined : 'erro')
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+  if (btn) btn.disabled = false
+}
+
+async function desativarPush() {
+  try {
+    const reg = await navigator.serviceWorker.ready
+    const inscricao = await reg.pushManager.getSubscription()
+    if (inscricao) {
+      await api('/push/cancelar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: inscricao.endpoint }) })
+      await inscricao.unsubscribe()
+    }
+    toast('🔕 Avisos desativados neste aparelho')
+    await abrirModalPush()
+    atualizarBotaoAvisos()
+  } catch(e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// Se o aparelho já tem inscrição, confirma no servidor de quem ela é: o mesmo celular
+// pode ter trocado de usuário, e o aviso tem de ir para quem está logado.
+async function sincronizarPush() {
+  if (await estadoPush() !== 'ativo') return
+  try {
+    const reg = await navigator.serviceWorker.ready
+    const inscricao = await reg.pushManager.getSubscription()
+    if (inscricao) await api('/push/inscrever', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuarioId: usuario.id, inscricao: inscricao.toJSON(), dispositivo: descreverAparelho() })
+    })
+  } catch(e) { /* silencioso: tenta de novo na próxima abertura */ }
+}
+
+// Toque numa notificação abre o app em /?aba=agenda&dia=AAAA-MM-DD.
+function abrirLink(url) {
+  const p = new URL(url, location.origin).searchParams
+  if (p.get('aba') !== 'agenda') return false
+  const dia = p.get('dia')
+  if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+    calAno = Number(dia.slice(0, 4))
+    calMes = Number(dia.slice(5, 7))
+    calDiaForcado = dia
+  }
+  mostrarAba('agenda')
+  navBtn('nav-agenda')
+  return true
+}
+
+function tratarLinkInicial() {
+  if (abrirLink(location.href)) history.replaceState(null, '', '/')
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.tipo === 'abrir-url' && usuario) abrirLink(e.data.url)
+  })
 }
 
 // ── START ──
