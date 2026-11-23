@@ -73,7 +73,15 @@ const EMOJI_CAT = {
   'Vestuário':'👕','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱',
   'Restaurante':'🍕','Outros':'📦'
 }
-const fmt = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
+// Uma cor por categoria, usada no calendário, na pizza e nas barras de orçamento.
+const COR_CAT = {
+  'Alimentação':'#f97316','Mercado':'#84cc16','Saúde':'#ef4444','Farmácia':'#f43f5e',
+  'Transporte':'#3b82f6','Combustível':'#0ea5e9','Educação':'#8b5cf6','Lazer':'#ec4899',
+  'Vestuário':'#d946ef','Casa':'#a16207','Financiamento':'#64748b','Assinatura':'#6366f1',
+  'Restaurante':'#f59e0b','Outros':'#94a3b8'
+}
+const corCat = c => COR_CAT[c] || '#94a3b8'
+const fmt =v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
 
 // Converte valor digitado em formato brasileiro (1.500,00 ou 1500,50 ou 1500.50) para número
 function parseBRL(str) {
@@ -606,7 +614,7 @@ async function abrirRelatorio() {
   // Gráfico de rosca — categorias
   if (cats.length) {
     if (chartCats2) chartCats2.destroy()
-    const coresCat = ['#16a34a','#dc2626','#2563eb','#d97706','#7c3aed','#0891b2','#db2777','#65a30d']
+    const coresCat = cats.map(c => corCat(c.categoria))
     chartCats2 = new Chart(document.getElementById('chart-cats').getContext('2d'), {
       type: 'doughnut',
       data: { labels: cats.map(c=>c.categoria), datasets: [{ data: cats.map(c=>c.total), backgroundColor: coresCat, borderWidth: 0, hoverOffset: 6 }] },
@@ -923,7 +931,7 @@ async function carregarCartoes() {
   if (cats.length) {
     const ctx = document.getElementById('grafico-cat').getContext('2d')
     if (graficoInstance) graficoInstance.destroy()
-    const cores = ['#16a34a','#dc2626','#2563eb','#d97706','#7c3aed','#0891b2','#db2777','#65a30d']
+    const cores = cats.map(c => corCat(c.categoria))
     graficoInstance = new Chart(ctx, {
       type: 'doughnut',
       data: { labels: cats.map(c=>c.categoria), datasets: [{ data: cats.map(c=>c.total), backgroundColor: cores, borderWidth: 0, hoverOffset: 6 }] },
@@ -947,6 +955,7 @@ function mostrarAba(nome) {
   document.querySelectorAll('.aba').forEach(a => a.style.display = 'none')
   document.getElementById('aba-' + nome).style.display = 'block'
   if (nome === 'inicio') carregarInicio()
+  if (nome === 'agenda') carregarAgenda()
   if (nome === 'metas') carregarMetas()
   if (nome === 'cartoes') carregarCartoes()
   if (nome === 'contas') carregarContas()
@@ -2477,7 +2486,7 @@ async function renderOrcamentosSecao() {
       const emoji = EMOJI_CAT_ORC[o.categoria] || '📦'
       return `<div class="orc-barra-item" onclick="abrirModalOrcamentos()">
         <div class="orc-barra-row">
-          <span class="orc-cat-label">${emoji} ${o.categoria}</span>
+          <span class="orc-cat-label"><i class="cal-dot" style="background:${corCat(o.categoria)};margin-right:5px"></i>${emoji} ${o.categoria}</span>
           <span class="orc-pct-label" style="color:${cor}">${fmt(gasto)} <span style="color:#64748b">/ ${fmt(o.valor_limite)}</span></span>
         </div>
         <div class="orc-barra-bg">
@@ -2793,6 +2802,145 @@ async function salvarMetaRenda() {
   } catch(e) {
     toast('❌ ' + e.message, 'erro')
   }
+}
+
+// ══════════════════════════════════════════
+//  AGENDA — calendário do mês com saldo previsto
+// ══════════════════════════════════════════
+const NOMES_MES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+let calMes = null, calAno = null, calDados = null, calDiaSel = null
+
+async function carregarAgenda() {
+  if (!calMes) {
+    const now = new Date()
+    calMes = now.getMonth() + 1
+    calAno = now.getFullYear()
+  }
+  document.getElementById('cal-titulo').textContent = `${NOMES_MES[calMes - 1]} ${calAno}`
+  document.getElementById('cal-dias').innerHTML = '<div class="cal-carregando">Carregando…</div>'
+  try {
+    calDados = await api(`/calendario?mes=${calMes}&ano=${calAno}${famQAnd()}`)
+    // Abre no dia de hoje se o mês for o corrente; senão no primeiro dia com movimento.
+    const hojeNoMes = calDados.dias.find(d => d.data === calDados.hoje)
+    const primeiroComItem = calDados.dias.find(d => d.itens.length)
+    calDiaSel = (hojeNoMes || primeiroComItem || calDados.dias[0]).data
+    renderCalendario()
+  } catch(e) {
+    document.getElementById('cal-dias').innerHTML = `<div class="cal-carregando">Erro: ${e.message}</div>`
+  }
+}
+
+function navegarMes(delta) {
+  calMes += delta
+  if (calMes > 12) { calMes = 1; calAno++ }
+  if (calMes < 1) { calMes = 12; calAno-- }
+  carregarAgenda()
+}
+
+function renderCalendario() {
+  const c = calDados
+  renderCalResumo(c)
+
+  const vazios = Array.from({ length: c.primeiroDiaSemana }, () => '<div class="cal-dia cal-vazio"></div>').join('')
+  const celulas = c.dias.map(d => {
+    const classes = ['cal-dia']
+    if (d.data === c.hoje) classes.push('cal-hoje')
+    if (d.data === calDiaSel) classes.push('cal-sel')
+    if (d.saldo != null && d.saldo < 0) classes.push('cal-negativo')
+    if (d.data < c.hoje) classes.push('cal-passado')
+
+    // Até 4 pontos: entrada em verde, saídas na cor da categoria; previsto vira contorno.
+    const pontos = d.itens.slice(0, 4).map(i => {
+      const cor = i.tipo === 'entrada' ? '#10b981' : corCat(i.categoria)
+      return i.previsto
+        ? `<i class="cal-dot cal-dot-prev" style="border-color:${cor}"></i>`
+        : `<i class="cal-dot" style="background:${cor}"></i>`
+    }).join('')
+    const mais = d.itens.length > 4 ? `<i class="cal-mais">+${d.itens.length - 4}</i>` : ''
+
+    return `<button class="${classes.join(' ')}" onclick="selecionarDia('${d.data}')">
+      <span class="cal-num">${d.dia}</span>
+      <span class="cal-dots">${pontos}${mais}</span>
+    </button>`
+  }).join('')
+
+  document.getElementById('cal-dias').innerHTML = vazios + celulas
+  renderDiaDetalhe()
+}
+
+function renderCalResumo(c) {
+  const el = document.getElementById('cal-resumo')
+  const resultado = c.totalEntradas - c.totalSaidas
+  let saldoHtml = ''
+  if (c.saldoFinal != null) {
+    const corFinal = c.saldoFinal >= 0 ? '#10b981' : '#e11d48'
+    const dataMenor = c.menorSaldo ? c.menorSaldo.data.slice(8, 10) + '/' + c.menorSaldo.data.slice(5, 7) : ''
+    // O alerta é o ponto da tela: em que dia o dinheiro acaba, se acabar.
+    const alerta = c.menorSaldo && c.menorSaldo.valor < 0
+      ? `<div class="cal-alerta">⚠️ O saldo fica negativo em <b>${dataMenor}</b> (chega a ${fmt(c.menorSaldo.valor)})</div>`
+      : c.menorSaldo
+        ? `<div class="cal-ok">✅ Fecha no azul. Ponto mais baixo: ${fmt(c.menorSaldo.valor)} em ${dataMenor}</div>`
+        : ''
+    saldoHtml = `
+      <div class="cal-saldo-linha">
+        <span>Saldo previsto no fim do mês</span>
+        <b style="color:${corFinal}">${fmt(c.saldoFinal)}</b>
+      </div>
+      ${alerta}`
+  } else {
+    saldoHtml = `<div class="cal-saldo-linha cal-saldo-info"><span>Saldo previsto só aparece do mês atual em diante</span></div>`
+  }
+
+  el.innerHTML = `
+    <div class="cal-totais">
+      <div><small>Entradas</small><b style="color:#10b981">${fmt(c.totalEntradas)}</b></div>
+      <div><small>Saídas</small><b style="color:#e11d48">${fmt(c.totalSaidas)}</b></div>
+      <div><small>Resultado</small><b style="color:${resultado >= 0 ? '#10b981' : '#e11d48'}">${fmt(resultado)}</b></div>
+    </div>
+    ${saldoHtml}`
+}
+
+function selecionarDia(data) {
+  calDiaSel = data
+  renderCalendario()
+  document.getElementById('cal-dia-detalhe').scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
+function renderDiaDetalhe() {
+  const el = document.getElementById('cal-dia-detalhe')
+  const d = calDados.dias.find(x => x.data === calDiaSel)
+  if (!d) { el.innerHTML = ''; return }
+  const [a, m, dia] = d.data.split('-')
+  const semana = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'][new Date(+a, +m - 1, +dia).getDay()]
+
+  const itens = d.itens.length
+    ? d.itens
+        .slice()
+        .sort((x, y) => (x.tipo === y.tipo ? y.valor - x.valor : x.tipo === 'entrada' ? -1 : 1))
+        .map(i => {
+          const entrada = i.tipo === 'entrada'
+          const icone = entrada ? (i.categoria === 'atendimento' ? '🩺' : '💰') : (EMOJI_CAT[i.categoria] || '📦')
+          const cor = entrada ? '#10b981' : corCat(i.categoria)
+          const fonte = { recorrente: 'fixa', emprestimo: 'parcela', programada: 'renda fixa' }[i.fonte]
+          return `<div class="cal-item" style="border-left-color:${cor}">
+            <span class="cal-item-ico">${icone}</span>
+            <div class="cal-item-info">
+              <div class="cal-item-desc">${i.descricao}</div>
+              <div class="cal-item-meta">${entrada ? 'Entrada' : i.categoria}${fonte ? ' · ' + fonte : ''}${i.previsto ? ' · <span class="cal-tag-prev">previsto</span>' : ''}</div>
+            </div>
+            <b class="cal-item-val" style="color:${entrada ? '#10b981' : '#e11d48'}">${entrada ? '+' : '−'}${fmt(i.valor)}</b>
+          </div>`
+        }).join('')
+    : `<div class="orc-vazio">Nenhum movimento neste dia</div>`
+
+  const saldo = d.saldo != null
+    ? `<div class="cal-dia-saldo">Saldo previsto ao fim do dia: <b style="color:${d.saldo >= 0 ? '#10b981' : '#e11d48'}">${fmt(d.saldo)}</b></div>`
+    : ''
+
+  el.innerHTML = `
+    <div class="section-title-row"><span>${semana}, ${dia}/${m}</span></div>
+    ${itens}
+    ${saldo}`
 }
 
 // ── START ──

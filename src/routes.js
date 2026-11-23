@@ -709,6 +709,18 @@ router.post('/meta-renda', (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
+router.get('/calendario', (req, res) => {
+  try {
+    const { familiaId, usuarioId, mes, ano } = req.query
+    res.json(db.calendarioMes(
+      familiaId ? parseInt(familiaId) : null,
+      usuarioId ? parseInt(usuarioId) : null,
+      mes ? parseInt(mes) : null,
+      ano ? parseInt(ano) : null
+    ))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 router.get('/dividas/custo', (req, res) => {
   try {
     const { familiaId, usuarioId } = req.query

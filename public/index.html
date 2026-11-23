@@ -249,6 +249,25 @@
     </section>
 
     <!-- ── ABA GASTOS ── -->
+    <section id="aba-agenda" class="aba" style="display:none">
+      <div class="cal-header">
+        <button class="cal-nav" onclick="navegarMes(-1)" aria-label="Mês anterior">‹</button>
+        <div class="cal-titulo" id="cal-titulo"></div>
+        <button class="cal-nav" onclick="navegarMes(1)" aria-label="Próximo mês">›</button>
+      </div>
+      <div id="cal-resumo" class="cal-resumo"></div>
+      <div class="cal-grade">
+        <div class="cal-semana"><span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span></div>
+        <div id="cal-dias" class="cal-dias"></div>
+        <div class="cal-legenda">
+          <span><i class="cal-dot" style="background:#10b981"></i>entrada</span>
+          <span><i class="cal-dot" style="background:#e11d48"></i>saída (cor da categoria)</span>
+          <span><i class="cal-dot cal-dot-prev"></i>previsto</span>
+        </div>
+      </div>
+      <div id="cal-dia-detalhe" class="cal-dia-detalhe"></div>
+    </section>
+
     <section id="aba-gastos" class="aba" style="display:none">
       <div class="chat-chips">
         <button onclick="chipGasto('Mercado')">🛒 Mercado</button>
@@ -341,6 +360,10 @@
     <button id="nav-inicio" class="nav-btn active" onclick="mostrarAba('inicio'); navBtn('nav-inicio')">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
       <small>Início</small>
+    </button>
+    <button id="nav-agenda" class="nav-btn" onclick="mostrarAba('agenda'); navBtn('nav-agenda')">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM7 12h5v5H7z"/></svg>
+      <small>Agenda</small>
     </button>
     <button id="nav-gastos" class="nav-btn" onclick="mostrarAba('gastos'); navBtn('nav-gastos')">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>

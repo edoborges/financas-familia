@@ -640,6 +640,142 @@ function custoDividas(familiaId = null, usuarioId = null) {
   }).sort((x, y) => y.juros_mes - x.juros_mes)
 }
 
+// ===== CALENDÁRIO DO MÊS =====
+function _porEscopo(sqlUsuario, sqlFamilia, sqlTodos, usuarioId, familiaId, ...params) {
+  if (usuarioId) return db.prepare(sqlUsuario).all(usuarioId, ...params)
+  if (familiaId) return db.prepare(sqlFamilia).all(familiaId, ...params)
+  return db.prepare(sqlTodos).all(...params)
+}
+
+// Todas as entradas e saídas de um mês, realizadas e previstas, cada uma com sua data.
+function itensCalendario(familiaId, usuarioId, m, a) {
+  const mesStr = `${a}-${String(m).padStart(2, '0')}`
+  const ultimoDia = new Date(a, m, 0).getDate()
+  const dataDoDia = d => `${mesStr}-${String(Math.min(Math.max(1, d), ultimoDia)).padStart(2, '0')}`
+  const itens = []
+
+  const gastos = _porEscopo(
+    `SELECT g.* FROM gastos g WHERE g.usuario_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`,
+    `SELECT g.* FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', g.data_gasto) = ?`,
+    `SELECT g.* FROM gastos g WHERE strftime('%Y-%m', g.data_gasto) = ?`,
+    usuarioId, familiaId, mesStr)
+  for (const g of gastos) {
+    itens.push({ data: String(g.data_gasto).slice(0, 10), tipo: 'saida', descricao: g.descricao, valor: Number(g.valor), categoria: g.categoria || 'Outros', fonte: g.origem === 'recorrente' ? 'recorrente' : 'gasto' })
+  }
+
+  // Recorrentes ainda não lançados neste mês entram como previsão no dia do vencimento.
+  const lancados = new Set(gastos.filter(g => g.recorrente_id).map(g => g.recorrente_id))
+  const recorrentes = _porEscopo(
+    `SELECT gr.* FROM gastos_recorrentes gr WHERE gr.usuario_id = ? AND gr.ativa = 1`,
+    `SELECT gr.* FROM gastos_recorrentes gr JOIN usuarios u ON gr.usuario_id = u.id WHERE u.familia_id = ? AND gr.ativa = 1`,
+    `SELECT gr.* FROM gastos_recorrentes gr WHERE gr.ativa = 1`,
+    usuarioId, familiaId)
+  for (const r of recorrentes) {
+    if (lancados.has(r.id)) continue
+    itens.push({ data: dataDoDia(r.dia_mes || 1), tipo: 'saida', descricao: r.descricao, valor: Number(r.valor), categoria: r.categoria || 'Outros', fonte: 'recorrente' })
+  }
+
+  // Parcela de empréstimo/financiamento no dia do vencimento cadastrado.
+  const emprestimos = _porEscopo(
+    `SELECT e.* FROM emprestimos e WHERE e.usuario_id = ? AND e.status = 'ativo'`,
+    `SELECT e.* FROM emprestimos e JOIN usuarios u ON e.usuario_id = u.id WHERE u.familia_id = ? AND e.status = 'ativo'`,
+    `SELECT e.* FROM emprestimos e WHERE e.status = 'ativo'`,
+    usuarioId, familiaId)
+  for (const e of emprestimos) {
+    if (!(Number(e.parcela_mensal) > 0) || !e.data_vencimento) continue
+    const dia = Number(String(e.data_vencimento).slice(8, 10)) || 1
+    itens.push({ data: dataDoDia(dia), tipo: 'saida', descricao: `Parcela ${e.descricao}`, valor: Number(e.parcela_mensal), categoria: 'Financiamento', fonte: 'emprestimo' })
+  }
+
+  const receitas = _porEscopo(
+    `SELECT r.* FROM receitas r WHERE r.usuario_id = ? AND strftime('%Y-%m', r.data_receita) = ?`,
+    `SELECT r.* FROM receitas r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_receita) = ?`,
+    `SELECT r.* FROM receitas r WHERE strftime('%Y-%m', r.data_receita) = ?`,
+    usuarioId, familiaId, mesStr)
+  for (const r of receitas) {
+    itens.push({ data: String(r.data_receita).slice(0, 10), tipo: 'entrada', descricao: r.descricao, valor: Number(r.valor), categoria: r.tipo || 'outro', fonte: 'receita' })
+  }
+
+  const programadas = _porEscopo(
+    `SELECT rp.* FROM receitas_programadas rp WHERE rp.usuario_id = ? AND rp.ativa = 1`,
+    `SELECT rp.* FROM receitas_programadas rp JOIN usuarios u ON rp.usuario_id = u.id WHERE u.familia_id = ? AND rp.ativa = 1`,
+    `SELECT rp.* FROM receitas_programadas rp WHERE rp.ativa = 1`,
+    usuarioId, familiaId)
+  for (const rp of programadas) {
+    const base = { tipo: 'entrada', descricao: rp.descricao, valor: Number(rp.valor), categoria: 'programada', fonte: 'programada' }
+    if (rp.tipo === 'semanal') {
+      const ds = rp.dia_semana != null ? Number(rp.dia_semana) : 1
+      for (let d = 1; d <= ultimoDia; d++) {
+        if (new Date(a, m - 1, d).getDay() === ds) itens.push({ ...base, data: dataDoDia(d) })
+      }
+    } else if (rp.tipo === 'quinzenal') {
+      const d1 = rp.dia_mes || 1
+      itens.push({ ...base, data: dataDoDia(d1) })
+      itens.push({ ...base, data: dataDoDia(d1 + 15) })
+    } else {
+      itens.push({ ...base, data: dataDoDia(rp.dia_mes || 1) })
+    }
+  }
+  return itens
+}
+
+// Monta a grade do mês e corre o saldo previsto dia a dia a partir do saldo de hoje.
+// O saldo das contas é o de hoje, então só o que vence depois de hoje mexe nele;
+// meses futuros começam do saldo final projetado do mês anterior.
+function calendarioMes(familiaId = null, usuarioId = null, mes = null, ano = null) {
+  const now = new Date()
+  const hojeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const m = mes || (now.getMonth() + 1)
+  const a = ano || now.getFullYear()
+  const idx = (y, mm) => y * 12 + (mm - 1)
+  const distancia = idx(a, m) - idx(now.getFullYear(), now.getMonth() + 1)
+
+  const fluxoFuturo = (y, mm) => itensCalendario(familiaId, usuarioId, mm, y)
+    .filter(i => i.data > hojeStr)
+    .reduce((acc, i) => acc + (i.tipo === 'entrada' ? i.valor : -i.valor), 0)
+
+  // Saldo de abertura: hoje para o mês corrente; projeção encadeada para até 6 meses à frente.
+  let saldoAbertura = null
+  if (distancia >= 0 && distancia <= 6) {
+    saldoAbertura = listarContas(familiaId, usuarioId).reduce((acc, c) => acc + Number(c.saldo || 0), 0)
+    for (let k = 0; k < distancia; k++) {
+      const t = idx(now.getFullYear(), now.getMonth() + 1) + k
+      saldoAbertura += fluxoFuturo(Math.floor(t / 12), (t % 12) + 1)
+    }
+  }
+
+  const itens = itensCalendario(familiaId, usuarioId, m, a)
+    .map(i => ({ ...i, previsto: i.data > hojeStr }))
+  const ultimoDia = new Date(a, m, 0).getDate()
+  const mesStr = `${a}-${String(m).padStart(2, '0')}`
+
+  let saldo = saldoAbertura
+  let menor = null
+  const dias = []
+  for (let d = 1; d <= ultimoDia; d++) {
+    const data = `${mesStr}-${String(d).padStart(2, '0')}`
+    const doDia = itens.filter(i => i.data === data)
+    const entradas = doDia.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+    const saidas = doDia.filter(i => i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+    let saldoDia = null
+    if (saldo != null && data >= hojeStr) {
+      if (data > hojeStr) saldo += entradas - saidas
+      saldoDia = saldo
+      if (!menor || saldo < menor.valor) menor = { valor: saldo, data }
+    }
+    dias.push({ dia: d, data, entradas, saidas, saldo: saldoDia, itens: doDia })
+  }
+
+  const totalEntradas = itens.filter(i => i.tipo === 'entrada').reduce((acc, i) => acc + i.valor, 0)
+  const totalSaidas = itens.filter(i => i.tipo === 'saida').reduce((acc, i) => acc + i.valor, 0)
+  return {
+    mes: m, ano: a, hoje: hojeStr,
+    primeiroDiaSemana: new Date(a, m - 1, 1).getDay(),
+    dias, totalEntradas, totalSaidas,
+    saldoAbertura, saldoFinal: saldo, menorSaldo: menor
+  }
+}
+
 // ===== RESUMO POR FAMÍLIA =====
 function resumoFinanceiro(familiaId = null, usuarioId = null) {
   const todosUsuarios = listarUsuarios(familiaId)
@@ -808,5 +944,6 @@ module.exports = {
   listarOrcamentos, salvarOrcamento, deletarOrcamento,
   listarRecorrentes, salvarRecorrente, atualizarRecorrente, deletarRecorrente, processarRecorrentes,
   obterMetaRenda, salvarMetaRenda, calcularMetaRenda, custoDividas,
+  calendarioMes,
   resumoFinanceiro
 }

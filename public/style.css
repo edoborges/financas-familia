@@ -888,3 +888,53 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .divida-custo{text-align:right;flex-shrink:0;display:flex;flex-direction:column}
 .divida-custo span{font-size:.88rem;font-weight:800;color:#e11d48}
 .divida-custo small{font-size:.65rem;color:#94a3b8}
+
+/* ═══ AGENDA (calendário do mês) ═══ */
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 12px}
+.cal-titulo{font-size:1.15rem;font-weight:900;letter-spacing:-.5px;color:var(--txt)}
+.cal-nav{width:38px;height:38px;border-radius:12px;border:none;background:var(--card);box-shadow:var(--shadow);font-size:1.4rem;line-height:1;color:#475569;cursor:pointer}
+.cal-nav:active{transform:scale(.94)}
+
+.cal-resumo{background:var(--card);border-radius:18px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.04)}
+.cal-totais{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.cal-totais div{display:flex;flex-direction:column;gap:2px}
+.cal-totais small{font-size:.66rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.cal-totais b{font-size:.92rem;font-weight:900;letter-spacing:-.3px}
+.cal-saldo-linha{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #eef2f7;padding-top:10px;font-size:.8rem;color:#475569}
+.cal-saldo-linha b{font-size:1.1rem;font-weight:900}
+.cal-saldo-info{color:#94a3b8;font-style:italic}
+.cal-alerta,.cal-ok{margin-top:10px;border-radius:10px;padding:9px 11px;font-size:.78rem;line-height:1.4}
+.cal-alerta{background:#fff1f2;color:#9f1239;border-left:3px solid #e11d48}
+.cal-ok{background:#f0fdf4;color:#166534;border-left:3px solid #10b981}
+
+.cal-grade{background:var(--card);border-radius:18px;padding:10px 8px 8px;margin-bottom:14px;box-shadow:var(--shadow);border:1px solid rgba(0,0,0,.04)}
+.cal-semana,.cal-dias{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-semana span{text-align:center;font-size:.68rem;font-weight:800;color:#94a3b8;padding-bottom:6px}
+.cal-dia{aspect-ratio:1/1.05;min-width:0;border:none;background:#f8fafc;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:5px 2px 3px;cursor:pointer;position:relative;transition:background .15s}
+.cal-dia:active{transform:scale(.95)}
+.cal-vazio{background:transparent;cursor:default}
+.cal-num{font-size:.8rem;font-weight:700;color:var(--txt)}
+.cal-passado .cal-num{color:#94a3b8}
+.cal-hoje{background:#eef2ff}
+.cal-hoje .cal-num{color:#4f46e5;font-weight:900}
+.cal-sel{box-shadow:0 0 0 2px #6366f1 inset;background:#fff}
+.cal-negativo{background:#fff1f2}
+.cal-negativo .cal-num{color:#e11d48}
+.cal-dots{display:flex;flex-wrap:wrap;justify-content:center;gap:2px;margin-top:auto;max-width:100%}
+.cal-dot{display:inline-block;width:6px;height:6px;border-radius:99px;flex-shrink:0}
+.cal-dot-prev{background:transparent;border:1.5px solid #94a3b8;width:6px;height:6px;box-sizing:border-box}
+.cal-mais{font-style:normal;font-size:.55rem;font-weight:800;color:#64748b;line-height:6px}
+.cal-carregando{grid-column:1/-1;text-align:center;padding:30px 0;color:#94a3b8;font-size:.85rem}
+.cal-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:center;margin-top:10px;font-size:.66rem;color:#94a3b8}
+.cal-legenda span{display:flex;align-items:center;gap:4px}
+
+.cal-dia-detalhe{margin-bottom:24px}
+.cal-item{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px;border:1px solid rgba(0,0,0,.04);border-left:4px solid #94a3b8}
+.cal-item-ico{font-size:1.15rem;flex-shrink:0}
+.cal-item-info{flex:1;min-width:0}
+.cal-item-desc{font-size:.86rem;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-item-meta{font-size:.72rem;color:#94a3b8}
+.cal-tag-prev{color:#6366f1;font-weight:700}
+.cal-item-val{font-size:.88rem;font-weight:800;flex-shrink:0}
+.cal-dia-saldo{font-size:.8rem;color:#64748b;text-align:right;padding:4px 4px 0}
+.cal-dia-saldo b{font-weight:900}
