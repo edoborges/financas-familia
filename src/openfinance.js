@@ -172,6 +172,10 @@ async function sincronizarItem(itemId) {
         const limite = Number(c.bankData?.overdraftContractedLimit) || 0
         db.ofDB.atualizarSaldoConta(oc.conta_id, Number(c.balance), limite)
       }
+      // Cartão: o limite total vem do banco.
+      if (c.type === 'CREDIT' && oc.cartao_id && Number(c.creditData?.creditLimit) > 0) {
+        db.ofDB.atualizarLimiteCartao(oc.cartao_id, Number(c.creditData.creditLimit))
+      }
       // Sem conta/cartão do app ligado, ainda não importa movimentos.
       if (!(oc.conta_id || oc.cartao_id)) continue
 

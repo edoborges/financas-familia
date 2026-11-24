@@ -1737,6 +1737,7 @@ const ofDB = {
     db.prepare('UPDATE contas SET saldo = ? WHERE id = ?').run(saldo, contaId)
     if (limite > 0) db.prepare('UPDATE contas SET limite = ? WHERE id = ? AND COALESCE(limite, 0) = 0').run(limite, contaId)
   },
+  atualizarLimiteCartao: (cartaoId, limite) => db.prepare('UPDATE cartoes SET limite = ? WHERE id = ?').run(limite, cartaoId),
   existeTx: (txId) => !!db.prepare('SELECT 1 FROM of_transacoes WHERE tx_id = ?').get(txId),
   inserirTx: (t) => db.prepare(`INSERT OR IGNORE INTO of_transacoes (tx_id, account_id, usuario_id, data, descricao, valor, direcao, categoria_pluggy, contraparte, metodo, operacao, parcela_atual, parcelas, status, sugestao, sugestao_categoria)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(t.txId, t.accountId, t.usuarioId, t.data, t.descricao, t.valor, t.direcao, t.categoriaPluggy || null, t.contraparte || null,
@@ -1805,7 +1806,13 @@ function enriquecerCartoes(cartoes) {
     const naoPaga = f => !pagos.has(`fatura:${c.id}:${f.data}`)
     const proxima = faturas.find(naoPaga) || null
     const doBanco = db.prepare('SELECT SUM(saldo) s, COUNT(*) n FROM of_contas WHERE cartao_id = ? AND COALESCE(ignorar, 0) = 0').get(c.id)
-    const usadoApp = faturas.filter(naoPaga).reduce((a, f) => a + f.valor, 0)
+    // Limite usado = compras e parcelas já feitas em faturas ainda não pagas (assinatura futura
+    // não ocupa limite), menos abatimentos.
+    const usadoApp = db.prepare('SELECT data_gasto, valor FROM gastos WHERE cartao_id = ?').all(c.id)
+      .map(g => ({ venc: vencimentoFatura(String(g.data_gasto).slice(0, 10), c.dia_fechamento, c.dia_vencimento), valor: Number(g.valor) }))
+      .filter(g => g.venc >= hoje && naoPaga({ data: g.venc }))
+      .reduce((a, g) => a + g.valor, 0)
+      - db.prepare('SELECT COALESCE(SUM(valor), 0) v FROM fatura_creditos WHERE cartao_id = ? AND vencimento >= ?').get(c.id, hoje).v
     const limiteUsado = doBanco.n ? Number(doBanco.s || 0) : usadoApp
     return {
       ...c,
