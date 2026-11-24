@@ -913,6 +913,8 @@ function appendChat(el) {
 
 // ── METAS ──
 async function carregarMetas() {
+  renderPatrimonio()
+  renderRecebiveis()
   const [metas, resumo] = await Promise.all([api('/metas' + famQ()), api('/resumo' + famQ())])
 
   // Resumo financeiro do planejamento. Usa a renda real do mês (programadas + lançadas),
@@ -3191,7 +3193,10 @@ function renderDiaDetalhe() {
           const cor = entrada ? '#10b981' : corCat(i.categoria)
           const fonte = { recorrente: 'fixa', emprestimo: 'parcela', programada: 'renda fixa', estimada: '<span class="tag-estimada">estimativa</span>' }[i.fonte]
           let meta = `${entrada ? 'Entrada' : i.categoria}${fonte ? ' · ' + fonte : ''}`
-          if (i.informativo) meta += ` · 💳 ${i.cartao}, sai na fatura de ${ddmm(i.vencimentoFatura)}`
+          if (i.fonte === 'recebivel') {
+            const destino = { investimento: 'vai para investimento', reserva: 'vai para a reserva', divida: 'vai quitar dívida', livre: 'entra no saldo' }[i.destino] || ''
+            meta = `A receber · ${destino}${i.recebido ? ' · <span class="cal-tag-pago">✓ recebido</span>' : ''}`
+          } else if (i.informativo) meta += ` · 💳 ${i.cartao}, sai na fatura de ${ddmm(i.vencimentoFatura)}`
           if (i.fonte === 'fatura') meta = `${i.compras.length} ${i.compras.length === 1 ? 'compra' : 'compras'}`
           // Conta a pagar: status e botão. Paga só por ser anterior ao "paguei" não ganha
           // "desfazer" — não há marcação para desfazer.
@@ -3467,6 +3472,11 @@ async function sincronizarPush() {
 // Toque numa notificação abre o app em /?aba=agenda&dia=AAAA-MM-DD.
 function abrirLink(url) {
   const p = new URL(url, location.origin).searchParams
+  if (p.get('aba') === 'metas') {
+    mostrarAba('metas')
+    navBtn('nav-metas')
+    return true
+  }
   if (p.get('aba') !== 'agenda') return false
   const dia = p.get('dia')
   if (dia && /^\d{4}-\d{2}-\d{2}$/.test(dia)) {
@@ -3487,6 +3497,244 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', e => {
     if (e.data && e.data.tipo === 'abrir-url' && usuario) abrirLink(e.data.url)
   })
+}
+
+// ══════════════════════════════════════════
+//  PATRIMÔNIO E VALORES A RECEBER (aba Metas)
+// ══════════════════════════════════════════
+const escH = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const hojeLocalBR = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
+const dataBR = d => d ? String(d).slice(0, 10).split('-').reverse().join('/') : ''
+const TIPO_PT = {
+  reserva: { emoji: '🛟', nome: 'Reserva', cor: '#0ea5e9' },
+  investimento: { emoji: '📈', nome: 'Investimentos', cor: '#16a34a' },
+  negocio: { emoji: '🏪', nome: 'Negócios', cor: '#f59e0b' },
+  bem: { emoji: '🏠', nome: 'Bens', cor: '#8b5cf6' },
+  outro: { emoji: '📦', nome: 'Outros', cor: '#64748b' }
+}
+const DESTINO_RB = {
+  investimento: '📈 Investir', reserva: '🛟 Reserva', divida: '💸 Quitar dívida', livre: '🛒 Usar no mês'
+}
+let ptItens = []
+let ptEdicaoId = null
+let ptTipoSel = 'investimento'
+let rbDestinoSel = 'investimento'
+let rcAtual = null
+let rcDestinoSel = 'investimento'
+
+async function renderPatrimonio() {
+  const el = document.getElementById('patrimonio-section')
+  if (!el) return
+  try {
+    const { itens, resumo: r } = await api('/patrimonio' + famQ())
+    ptItens = itens
+    const linhas = Object.entries(TIPO_PT)
+      .filter(([t]) => r.porTipo[t])
+      .map(([t, info]) => `<div class="pt-linha"><span>${info.emoji} ${info.nome}</span><b>${fmt(r.porTipo[t])}</b></div>`).join('')
+    const max = Math.max(1, ...r.historico.map(h => Math.abs(h.liquido)))
+    const barras = r.historico.length > 1 ? `
+      <div class="pt-hist">${r.historico.map(h => `
+        <div class="pt-hist-col" title="${h.mes}: ${fmt(h.liquido)}">
+          <div class="pt-hist-bar ${h.liquido < 0 ? 'neg' : ''}" style="height:${Math.max(4, Math.abs(h.liquido) / max * 46)}px"></div>
+          <span>${h.mes.slice(5)}</span>
+        </div>`).join('')}
+      </div>` : ''
+    el.innerHTML = `
+      <div class="pt-card">
+        <div class="pt-label">Patrimônio líquido</div>
+        <div class="pt-valor ${r.liquido < 0 ? 'neg' : ''}">${fmt(r.liquido)}</div>
+        <div class="pt-sub">Com o que ainda vai receber: <b>${fmt(r.liquidoComReceber)}</b></div>
+        ${barras}
+        <div class="pt-linhas">
+          ${linhas}
+          <div class="pt-linha"><span>🏦 Saldo nas contas</span><b>${fmt(r.contas)}</b></div>
+          <div class="pt-linha neg"><span>💸 Dívidas</span><b>− ${fmt(r.dividas)}</b></div>
+          ${r.aReceber ? `<div class="pt-linha receber"><span>💰 A receber</span><b>+ ${fmt(r.aReceber)}</b></div>` : ''}
+        </div>
+      </div>
+      ${itens.length ? `<div class="pt-itens">${itens.map(p => {
+        const info = TIPO_PT[p.tipo] || TIPO_PT.outro
+        return `<div class="pt-item" style="border-left-color:${info.cor}" onclick="abrirModalPatrimonio(${p.id})">
+          <div><div class="pt-item-nome">${info.emoji} ${escH(p.nome)}</div>
+          <div class="pt-item-sub">${escH(p.instituicao || info.nome)}${visaoAtual === 'consolidado' ? ' · ' + escH(p.usuario_nome) : ''} · atualizado ${dataBR(p.atualizado_em)}</div></div>
+          <b>${fmt(p.valor)}</b></div>`
+      }).join('')}</div>` : `<div class="pt-vazio" onclick="abrirModalPatrimonio()">Cadastre sua reserva, investimentos, negócios e bens para acompanhar o patrimônio crescer. <b>＋ Adicionar</b></div>`}`
+  } catch (e) {
+    el.innerHTML = `<div class="pt-vazio">Não foi possível carregar o patrimônio: ${escH(e.message)}</div>`
+  }
+}
+
+function selPtTipo(tipo) {
+  ptTipoSel = tipo
+  document.querySelectorAll('#pt-tipos .rtipo-btn').forEach(b => b.classList.toggle('sel', b.dataset.tipo === tipo))
+}
+function abrirModalPatrimonio(id = null) {
+  const p = id ? ptItens.find(x => x.id === id) : null
+  ptEdicaoId = p ? p.id : null
+  document.getElementById('pt-titulo').textContent = p ? '🏛️ Editar item' : '🏛️ Novo item do patrimônio'
+  document.getElementById('pt-nome').value = p?.nome || ''
+  document.getElementById('pt-inst').value = p?.instituicao || ''
+  document.getElementById('pt-valor').value = p ? String(Number(p.valor).toFixed(2)).replace('.', ',') : ''
+  document.getElementById('pt-excluir').style.display = p ? 'block' : 'none'
+  selPtTipo(p?.tipo || 'investimento')
+  document.getElementById('modal-patrimonio').style.display = 'flex'
+}
+async function salvarPatrimonioItem() {
+  const nome = document.getElementById('pt-nome').value.trim()
+  if (!nome) { toast('Informe o nome!', 'erro'); return }
+  const body = { usuarioId: usuario.id, tipo: ptTipoSel, nome, instituicao: document.getElementById('pt-inst').value.trim(), valor: parseBRL(document.getElementById('pt-valor').value) }
+  try {
+    await api(ptEdicaoId ? `/patrimonio/${ptEdicaoId}` : '/patrimonio', {
+      method: ptEdicaoId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    })
+    fecharModal('modal-patrimonio')
+    toast('✅ Patrimônio atualizado')
+    renderPatrimonio()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function excluirPatrimonio() {
+  if (!ptEdicaoId || !confirm('Excluir este item do patrimônio?')) return
+  await api(`/patrimonio/${ptEdicaoId}`, { method: 'DELETE' })
+  fecharModal('modal-patrimonio')
+  renderPatrimonio()
+}
+
+async function renderRecebiveis() {
+  const el = document.getElementById('recebiveis-section')
+  if (!el) return
+  try {
+    const lista = await api('/recebiveis' + famQ())
+    if (!lista.length) {
+      el.innerHTML = `<div class="pt-vazio" onclick="abrirModalRecebivel()">Venda parcelada, dinheiro que vão te devolver… Cadastre e o app mostra na Agenda e avisa se atrasar. <b>＋ Novo</b></div>`
+      return
+    }
+    const hoje = hojeLocalBR()
+    const grupos = {}
+    for (const r of lista) (grupos[r.grupo] ||= []).push(r)
+    el.innerHTML = Object.entries(grupos).map(([grupo, rs]) => {
+      const total = rs.reduce((a, r) => a + Number(r.valor), 0)
+      const recebido = rs.filter(r => r.recebido_em).reduce((a, r) => a + Number(r.valor_recebido ?? r.valor), 0)
+      const pend = rs.filter(r => !r.recebido_em)
+      const atrasados = pend.filter(r => r.data_prevista < hoje)
+      const proximos = pend.filter(r => r.data_prevista >= hoje)
+      const pct = total > 0 ? Math.min(100, recebido / total * 100) : 0
+      const linha = r => {
+        const atr = !r.recebido_em && r.data_prevista < hoje
+        return `<div class="rb-item ${r.recebido_em ? 'ok' : ''} ${atr ? 'atr' : ''}">
+          <div class="rb-item-info">
+            <div class="rb-item-nome">${escH(r.descricao)} <span class="rb-tag">${DESTINO_RB[r.destino] || ''}</span></div>
+            <div class="rb-item-sub">${r.recebido_em ? `✅ recebido em ${dataBR(r.recebido_em)}${r.patrimonio_nome ? ' → ' + escH(r.patrimonio_nome) : ''}` : (atr ? '⚠️ atrasado · era ' : 'previsto ') + dataBR(r.data_prevista)}</div>
+          </div>
+          <div class="rb-item-dir">
+            <b>${fmt(r.valor_recebido ?? r.valor)}</b>
+            ${r.recebido_em
+              ? `<button class="cal-desfazer" onclick="desfazerRecebi(event, ${r.id})">desfazer</button>`
+              : `<button class="cp-paguei" onclick="abrirRecebi(${r.id})">Recebi</button>`}
+          </div>
+        </div>`
+      }
+      const visiveis = [...atrasados, ...proximos.slice(0, 2)]
+      const resto = rs.filter(r => !visiveis.includes(r))
+      return `<div class="rb-grupo">
+        <div class="rb-topo">
+          <div><div class="rb-nome">💰 ${escH(grupo)}</div>
+          <div class="rb-sub">${rs.length - pend.length} de ${rs.length} recebidos${visaoAtual === 'consolidado' ? ' · ' + escH(rs[0].usuario_nome) : ''}</div></div>
+          <div class="rb-total"><b>${fmt(recebido)}</b><span>de ${fmt(total)}</span></div>
+        </div>
+        <div class="rb-barra"><div style="width:${pct}%"></div></div>
+        ${visiveis.map(linha).join('')}
+        ${resto.length ? `<details class="rb-mais"><summary>Ver todos (${resto.length} a mais)</summary>${resto.map(linha).join('')}</details>` : ''}
+      </div>`
+    }).join('')
+  } catch (e) {
+    el.innerHTML = `<div class="pt-vazio">Não foi possível carregar: ${escH(e.message)}</div>`
+  }
+}
+
+function selRbDestino(d) {
+  rbDestinoSel = d
+  document.querySelectorAll('#rb-destinos .rtipo-btn').forEach(b => b.classList.toggle('sel', b.dataset.destino === d))
+}
+function abrirModalRecebivel() {
+  document.getElementById('rb-grupo').value = ''
+  document.getElementById('rb-valor').value = ''
+  document.getElementById('rb-qtd').value = '1'
+  document.getElementById('rb-data').value = hojeLocalBR()
+  selRbDestino('investimento')
+  document.getElementById('modal-recebivel').style.display = 'flex'
+}
+// Mesma data nos meses seguintes; em mês mais curto, cai no último dia.
+function somaMesesData(data, n) {
+  const [a, m, d] = data.split('-').map(Number)
+  const alvo = new Date(a, m - 1 + n, 1)
+  const ultimo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate()
+  return `${alvo.getFullYear()}-${String(alvo.getMonth() + 1).padStart(2, '0')}-${String(Math.min(d, ultimo)).padStart(2, '0')}`
+}
+async function salvarRecebivel() {
+  const grupo = document.getElementById('rb-grupo').value.trim()
+  const valor = parseBRL(document.getElementById('rb-valor').value)
+  const qtd = Math.min(120, Math.max(1, parseInt(document.getElementById('rb-qtd').value) || 1))
+  const data = document.getElementById('rb-data').value
+  if (!grupo || !(valor > 0) || !data) { toast('Preencha nome, valor e data!', 'erro'); return }
+  const itens = Array.from({ length: qtd }, (_, i) => ({
+    descricao: qtd > 1 ? `Parcela ${i + 1}/${qtd}` : 'Entrada', valor, data: somaMesesData(data, i), destino: rbDestinoSel
+  }))
+  try {
+    await api('/recebiveis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, grupo, itens }) })
+    fecharModal('modal-recebivel')
+    toast(`✅ ${qtd} valor${qtd > 1 ? 'es' : ''} a receber cadastrado${qtd > 1 ? 's' : ''}`)
+    renderRecebiveis(); renderPatrimonio()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+function selRcDestino(d) {
+  rcDestinoSel = d
+  document.querySelectorAll('#rc-destinos .rtipo-btn').forEach(b => b.classList.toggle('sel', b.dataset.destino === d))
+  const ondeVisivel = d === 'investimento' || d === 'reserva'
+  document.getElementById('rc-onde').style.display = ondeVisivel ? 'block' : 'none'
+  if (ondeVisivel) {
+    const sel = document.getElementById('rc-patrimonio')
+    const opcoes = ptItens.filter(p => p.tipo === d)
+    sel.innerHTML = opcoes.map(p => `<option value="${p.id}">${escH(p.nome)} (${fmt(p.valor)})</option>`).join('') +
+      `<option value="novo">＋ Criar "${d === 'reserva' ? 'Reserva de emergência' : 'Investimentos'}"</option>` +
+      `<option value="">Não somar em nenhum</option>`
+  }
+}
+async function abrirRecebi(id) {
+  const lista = await api('/recebiveis' + famQ())
+  rcAtual = lista.find(r => r.id === id)
+  if (!rcAtual) return
+  try { ptItens = (await api('/patrimonio' + famQ())).itens } catch (e) {}
+  document.getElementById('rc-desc').textContent = `${rcAtual.grupo} · ${rcAtual.descricao} — previsto ${dataBR(rcAtual.data_prevista)}`
+  document.getElementById('rc-valor').value = String(Number(rcAtual.valor).toFixed(2)).replace('.', ',')
+  document.getElementById('rc-data').value = hojeLocalBR()
+  selRcDestino(rcAtual.destino || 'investimento')
+  document.getElementById('modal-recebi').style.display = 'flex'
+}
+async function confirmarRecebi() {
+  if (!rcAtual) return
+  try {
+    let patrimonioId = null
+    if (rcDestinoSel === 'investimento' || rcDestinoSel === 'reserva') {
+      const v = document.getElementById('rc-patrimonio').value
+      if (v === 'novo') {
+        const novo = await api('/patrimonio', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usuarioId: rcAtual.usuario_id, tipo: rcDestinoSel, nome: rcDestinoSel === 'reserva' ? 'Reserva de emergência' : 'Investimentos', valor: 0 }) })
+        patrimonioId = novo.id
+      } else if (v) patrimonioId = parseInt(v)
+    }
+    await api(`/recebiveis/${rcAtual.id}/recebi`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ valor: parseBRL(document.getElementById('rc-valor').value), data: document.getElementById('rc-data').value, destino: rcDestinoSel, patrimonioId }) })
+    fecharModal('modal-recebi')
+    toast('✅ Recebimento registrado')
+    renderRecebiveis(); renderPatrimonio()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function desfazerRecebi(ev, id) {
+  ev.preventDefault(); ev.stopPropagation()
+  if (!confirm('Desfazer este recebimento? Se o valor foi somado num item do patrimônio, ele sai de lá.')) return
+  await api(`/recebiveis/${id}/recebi`, { method: 'DELETE' })
+  renderRecebiveis(); renderPatrimonio()
 }
 
 // ── START ──

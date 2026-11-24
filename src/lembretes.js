@@ -102,6 +102,25 @@ async function verificarContas(usuarioId, hoje) {
   return enviados
 }
 
+// Valor a receber que passou da data sem ser marcado como recebido: avisa uma vez por item.
+async function verificarRecebiveis(usuarioId) {
+  const atrasados = db.recebiveisAtrasados(usuarioId).filter(r => !db.jaNotificado(usuarioId, 'receb:' + r.id, 'atraso'))
+  if (!atrasados.length) return 0
+  const fmt = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const total = atrasados.reduce((a, r) => a + Number(r.valor), 0)
+  const r0 = atrasados[0]
+  const n = await enviarParaUsuario(usuarioId, {
+    title: atrasados.length === 1 ? '💰 Valor a receber atrasado' : `💰 ${atrasados.length} valores a receber atrasados`,
+    body: atrasados.length === 1
+      ? `${r0.grupo} · ${r0.descricao}: ${fmt(r0.valor)} era para ${r0.data_prevista.split('-').reverse().join('/')}. Já caiu? Marque "Recebi".`
+      : `Total de ${fmt(total)}. Confira se já caíram e marque "Recebi".`,
+    tag: 'recebiveis-atraso',
+    url: '/?aba=metas'
+  })
+  if (n > 0) atrasados.forEach(r => db.registrarNotificacao(usuarioId, 'receb:' + r.id, 'atraso'))
+  return n
+}
+
 // Avisa uma vez ao passar de 80% e outra ao estourar, por categoria e por mês.
 async function verificarOrcamentos(usuarioId, hoje) {
   const [ano, mes] = hoje.split('-').map(Number)
@@ -146,6 +165,7 @@ async function verificarLembretes({ forcar = false } = {}) {
       try {
         enviados += await verificarContas(uid, hoje)
         enviados += await verificarOrcamentos(uid, hoje)
+        enviados += await verificarRecebiveis(uid)
       } catch (e) {
         console.error(`lembretes do usuário ${uid} falharam:`, e.message)
       }

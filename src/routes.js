@@ -311,6 +311,69 @@ router.post('/cartoes', (req, res) => {
   }
 })
 
+// ===== VALORES A RECEBER =====
+const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
+router.get('/recebiveis', (req, res) => {
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarRecebiveis(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+})
+// Cria um ou vários de uma vez (ex.: as 31 entradas de uma venda parcelada).
+router.post('/recebiveis', (req, res) => {
+  try {
+    const { usuarioId, grupo, itens } = req.body
+    const lista = Array.isArray(itens) ? itens : []
+    if (!usuarioId || !grupo || !lista.length || lista.length > 240) return res.status(400).json({ erro: 'Informe pessoa, nome e de 1 a 240 valores' })
+    for (const [i, it] of lista.entries()) {
+      if (!it.descricao || !(Number(it.valor) > 0) || !dataOk(it.data)) return res.status(400).json({ erro: `Valor ${i + 1} incompleto ou com data inválida` })
+    }
+    const n = db.criarRecebiveis(parseInt(usuarioId), String(grupo).slice(0, 80), lista.map(it => ({ ...it, valor: Math.round(Number(it.valor) * 100) / 100 })))
+    res.json({ ok: true, criados: n })
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.put('/recebiveis/:id', (req, res) => {
+  const r = db.editarRecebivel(parseInt(req.params.id), req.body || {})
+  if (!r) return res.status(404).json({ erro: 'Não encontrado' })
+  res.json(r)
+})
+router.post('/recebiveis/:id/recebi', (req, res) => {
+  try {
+    const r = db.marcarRecebido(parseInt(req.params.id), req.body || {})
+    if (!r) return res.status(404).json({ erro: 'Não encontrado' })
+    res.json(r)
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/recebiveis/:id/recebi', (req, res) => {
+  res.json(db.desfazerRecebido(parseInt(req.params.id)) || {})
+})
+router.delete('/recebiveis/:id', (req, res) => {
+  db.deletarRecebivel(parseInt(req.params.id))
+  res.json({ ok: true })
+})
+
+// ===== PATRIMÔNIO =====
+router.get('/patrimonio', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.query
+    const f = familiaId ? parseInt(familiaId) : null
+    const u = usuarioId ? parseInt(usuarioId) : null
+    res.json({ itens: db.listarPatrimonio(f, u), resumo: db.resumoPatrimonio(f, u) })
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/patrimonio', (req, res) => {
+  const { usuarioId, tipo, nome, valor, instituicao } = req.body
+  if (!usuarioId || !nome) return res.status(400).json({ erro: 'Informe o nome' })
+  res.json(db.salvarPatrimonio(parseInt(usuarioId), { tipo, nome: String(nome).slice(0, 80), valor, instituicao }))
+})
+router.put('/patrimonio/:id', (req, res) => {
+  const { tipo, nome, valor, instituicao } = req.body
+  if (!nome) return res.status(400).json({ erro: 'Informe o nome' })
+  res.json(db.salvarPatrimonio(null, { id: parseInt(req.params.id), tipo, nome: String(nome).slice(0, 80), valor, instituicao }))
+})
+router.delete('/patrimonio/:id', (req, res) => {
+  db.deletarPatrimonio(parseInt(req.params.id))
+  res.json({ ok: true })
+})
+
 // Editar cartão (nome, limite, dia de fechamento e de vencimento).
 router.put('/cartoes/:id', (req, res) => {
   const c = db.editarCartao(parseInt(req.params.id), req.body || {})

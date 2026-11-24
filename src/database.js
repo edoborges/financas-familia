@@ -197,6 +197,43 @@ db.exec(`
     PRIMARY KEY (usuario_id, chave, tipo)
   );
 
+  -- Valores a receber (ex.: venda parcelada). Cada parcela é uma linha.
+  CREATE TABLE IF NOT EXISTS recebiveis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    grupo TEXT NOT NULL,
+    descricao TEXT NOT NULL,
+    valor REAL NOT NULL,
+    data_prevista DATE NOT NULL,
+    destino TEXT DEFAULT 'investimento',
+    recebido_em DATE,
+    valor_recebido REAL,
+    patrimonio_id INTEGER,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Patrimônio: reserva, investimentos, negócios, bens.
+  CREATE TABLE IF NOT EXISTS patrimonio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    nome TEXT NOT NULL,
+    valor REAL DEFAULT 0,
+    instituicao TEXT DEFAULT '',
+    atualizado_em DATE,
+    ativo INTEGER DEFAULT 1
+  );
+
+  -- Uma fotografia por pessoa por mês, para o gráfico de evolução.
+  CREATE TABLE IF NOT EXISTS patrimonio_historico (
+    usuario_id INTEGER NOT NULL,
+    mes TEXT NOT NULL,
+    ativos REAL DEFAULT 0,
+    dividas REAL DEFAULT 0,
+    a_receber REAL DEFAULT 0,
+    PRIMARY KEY (usuario_id, mes)
+  );
+
   -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
   -- por ninguém.
   CREATE TABLE IF NOT EXISTS sessoes (
@@ -916,7 +953,152 @@ function itensCalendario(familiaId, usuarioId, m, a) {
       itens.push({ ...base, data: dataDoDia(rp.dia_mes || 1) })
     }
   }
+
+  // Valores a receber (venda parcelada etc.). O que já tem destino (investimento, reserva,
+  // quitar dívida) aparece na Agenda mas não engorda o saldo para gastar: é informativo.
+  const recebiveis = _porEscopo(
+    `SELECT r.* FROM recebiveis r WHERE r.usuario_id = ? AND strftime('%Y-%m', r.data_prevista) = ?`,
+    `SELECT r.* FROM recebiveis r JOIN usuarios u ON r.usuario_id = u.id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_prevista) = ?`,
+    `SELECT r.* FROM recebiveis r WHERE strftime('%Y-%m', r.data_prevista) = ?`,
+    usuarioId, familiaId, mesStr)
+  for (const r of recebiveis) {
+    itens.push({
+      data: String(r.data_prevista).slice(0, 10), tipo: 'entrada', valor: Number(r.valor_recebido ?? r.valor),
+      descricao: `${r.grupo} · ${r.descricao}`, categoria: 'A receber', fonte: 'recebivel',
+      informativo: r.destino !== 'livre', destino: r.destino, recebido: !!r.recebido_em, recebivelId: r.id
+    })
+  }
   return itens
+}
+
+// ===== VALORES A RECEBER =====
+const DESTINOS = ['investimento', 'reserva', 'divida', 'livre']
+function listarRecebiveis(familiaId = null, usuarioId = null) {
+  return _porEscopo(
+    `SELECT r.*, u.nome AS usuario_nome, p.nome AS patrimonio_nome FROM recebiveis r JOIN usuarios u ON u.id = r.usuario_id LEFT JOIN patrimonio p ON p.id = r.patrimonio_id WHERE r.usuario_id = ? ORDER BY r.data_prevista, r.id`,
+    `SELECT r.*, u.nome AS usuario_nome, p.nome AS patrimonio_nome FROM recebiveis r JOIN usuarios u ON u.id = r.usuario_id LEFT JOIN patrimonio p ON p.id = r.patrimonio_id WHERE u.familia_id = ? ORDER BY r.data_prevista, r.id`,
+    `SELECT r.*, u.nome AS usuario_nome, p.nome AS patrimonio_nome FROM recebiveis r JOIN usuarios u ON u.id = r.usuario_id LEFT JOIN patrimonio p ON p.id = r.patrimonio_id ORDER BY r.data_prevista, r.id`,
+    usuarioId, familiaId)
+}
+function criarRecebiveis(usuarioId, grupo, itens) {
+  const ins = db.prepare('INSERT INTO recebiveis (usuario_id, grupo, descricao, valor, data_prevista, destino) VALUES (?, ?, ?, ?, ?, ?)')
+  db.exec('BEGIN')
+  try {
+    for (const it of itens) {
+      ins.run(usuarioId, grupo, it.descricao, it.valor, it.data, DESTINOS.includes(it.destino) ? it.destino : 'investimento')
+    }
+    db.exec('COMMIT')
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+  return itens.length
+}
+function editarRecebivel(id, { grupo, descricao, valor, data, destino }) {
+  const r = db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+  if (!r) return null
+  db.prepare('UPDATE recebiveis SET grupo = ?, descricao = ?, valor = ?, data_prevista = ?, destino = ? WHERE id = ?').run(
+    grupo || r.grupo, descricao || r.descricao, Number(valor) > 0 ? Number(valor) : r.valor,
+    /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : r.data_prevista,
+    DESTINOS.includes(destino) ? destino : r.destino, id)
+  return db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+}
+// "Recebi": guarda quanto e quando chegou e, se foi para um item do patrimônio
+// (investimento ou reserva), soma o valor nele.
+function marcarRecebido(id, { valor, data, destino, patrimonioId }) {
+  const r = db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+  if (!r) return null
+  if (r.recebido_em) desfazerRecebido(id)
+  const v = Number(valor) > 0 ? Number(valor) : Number(r.valor)
+  const dest = DESTINOS.includes(destino) ? destino : r.destino
+  const pid = patrimonioId ? Number(patrimonioId) : null
+  db.exec('BEGIN')
+  try {
+    db.prepare('UPDATE recebiveis SET recebido_em = ?, valor_recebido = ?, destino = ?, patrimonio_id = ? WHERE id = ?')
+      .run(/^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : hojeBR(), v, dest, pid, id)
+    if (pid) db.prepare('UPDATE patrimonio SET valor = valor + ?, atualizado_em = ? WHERE id = ?').run(v, hojeBR(), pid)
+    db.exec('COMMIT')
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+  registrarHistoricoPatrimonio(r.usuario_id)
+  return db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+}
+function desfazerRecebido(id) {
+  const r = db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+  if (!r || !r.recebido_em) return r
+  if (r.patrimonio_id) db.prepare('UPDATE patrimonio SET valor = valor - ?, atualizado_em = ? WHERE id = ?').run(Number(r.valor_recebido || r.valor), hojeBR(), r.patrimonio_id)
+  db.prepare('UPDATE recebiveis SET recebido_em = NULL, valor_recebido = NULL, patrimonio_id = NULL WHERE id = ?').run(id)
+  registrarHistoricoPatrimonio(r.usuario_id)
+  return db.prepare('SELECT * FROM recebiveis WHERE id = ?').get(id)
+}
+function deletarRecebivel(id) {
+  desfazerRecebido(id)
+  return db.prepare('DELETE FROM recebiveis WHERE id = ?').run(id)
+}
+// Previstos que já passaram da data e não foram marcados (para o aviso no celular).
+function recebiveisAtrasados(usuarioId) {
+  return db.prepare('SELECT * FROM recebiveis WHERE usuario_id = ? AND recebido_em IS NULL AND data_prevista < ? ORDER BY data_prevista').all(usuarioId, hojeBR())
+}
+
+// ===== PATRIMÔNIO =====
+const TIPOS_PATRIMONIO = ['reserva', 'investimento', 'negocio', 'bem', 'outro']
+function listarPatrimonio(familiaId = null, usuarioId = null) {
+  return _porEscopo(
+    `SELECT p.*, u.nome AS usuario_nome FROM patrimonio p JOIN usuarios u ON u.id = p.usuario_id WHERE p.usuario_id = ? AND p.ativo = 1 ORDER BY p.tipo, p.nome`,
+    `SELECT p.*, u.nome AS usuario_nome FROM patrimonio p JOIN usuarios u ON u.id = p.usuario_id WHERE u.familia_id = ? AND p.ativo = 1 ORDER BY p.tipo, p.nome`,
+    `SELECT p.*, u.nome AS usuario_nome FROM patrimonio p JOIN usuarios u ON u.id = p.usuario_id WHERE p.ativo = 1 ORDER BY p.tipo, p.nome`,
+    usuarioId, familiaId)
+}
+function salvarPatrimonio(usuarioId, { id, tipo, nome, valor, instituicao }) {
+  const t = TIPOS_PATRIMONIO.includes(tipo) ? tipo : 'outro'
+  let pid = id
+  if (id) {
+    db.prepare('UPDATE patrimonio SET tipo = ?, nome = ?, valor = ?, instituicao = ?, atualizado_em = ? WHERE id = ?')
+      .run(t, nome, Number(valor) || 0, instituicao || '', hojeBR(), id)
+  } else {
+    pid = Number(db.prepare('INSERT INTO patrimonio (usuario_id, tipo, nome, valor, instituicao, atualizado_em) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(usuarioId, t, nome, Number(valor) || 0, instituicao || '', hojeBR()).lastInsertRowid)
+  }
+  const dono = db.prepare('SELECT usuario_id FROM patrimonio WHERE id = ?').get(pid)?.usuario_id
+  if (dono) registrarHistoricoPatrimonio(dono)
+  return db.prepare('SELECT * FROM patrimonio WHERE id = ?').get(pid)
+}
+function deletarPatrimonio(id) {
+  const p = db.prepare('SELECT usuario_id FROM patrimonio WHERE id = ?').get(id)
+  db.prepare('UPDATE patrimonio SET ativo = 0 WHERE id = ?').run(id)
+  db.prepare('UPDATE recebiveis SET patrimonio_id = NULL WHERE patrimonio_id = ?').run(id)
+  if (p) registrarHistoricoPatrimonio(p.usuario_id)
+}
+// Fotografia do patrimônio de uma pessoa: o que tem, o que deve e o que ainda vai receber.
+function _numerosPatrimonio(usuarioIds) {
+  if (!usuarioIds.length) return { itens: 0, contas: 0, dividas: 0, aReceber: 0 }
+  const em = `(${usuarioIds.map(() => '?').join(',')})`
+  const um = sql => Number(db.prepare(sql).get(...usuarioIds).v || 0)
+  return {
+    itens: um(`SELECT COALESCE(SUM(valor), 0) v FROM patrimonio WHERE ativo = 1 AND usuario_id IN ${em}`),
+    contas: um(`SELECT COALESCE(SUM(saldo), 0) v FROM contas WHERE usuario_id IN ${em}`),
+    dividas: um(`SELECT COALESCE(SUM(valor_total - valor_pago), 0) v FROM emprestimos WHERE status = 'ativo' AND usuario_id IN ${em}`),
+    aReceber: um(`SELECT COALESCE(SUM(valor), 0) v FROM recebiveis WHERE recebido_em IS NULL AND usuario_id IN ${em}`)
+  }
+}
+function registrarHistoricoPatrimonio(usuarioId) {
+  const n = _numerosPatrimonio([usuarioId])
+  db.prepare(`INSERT INTO patrimonio_historico (usuario_id, mes, ativos, dividas, a_receber) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(usuario_id, mes) DO UPDATE SET ativos = excluded.ativos, dividas = excluded.dividas, a_receber = excluded.a_receber`)
+    .run(usuarioId, hojeBR().slice(0, 7), n.itens + n.contas, n.dividas, n.aReceber)
+}
+function resumoPatrimonio(familiaId = null, usuarioId = null) {
+  const ids = usuarioId ? [usuarioId]
+    : db.prepare('SELECT id FROM usuarios WHERE familia_id = ?').all(familiaId).map(u => u.id)
+  for (const id of ids) registrarHistoricoPatrimonio(id)
+  const n = _numerosPatrimonio(ids)
+  const porTipo = {}
+  for (const p of listarPatrimonio(familiaId, usuarioId)) porTipo[p.tipo] = (porTipo[p.tipo] || 0) + Number(p.valor)
+  const em = `(${ids.map(() => '?').join(',') || 'NULL'})`
+  const historico = ids.length ? db.prepare(`SELECT mes, SUM(ativos) ativos, SUM(dividas) dividas, SUM(a_receber) a_receber
+    FROM patrimonio_historico WHERE usuario_id IN ${em} GROUP BY mes ORDER BY mes DESC LIMIT 12`).all(...ids).reverse() : []
+  const ativos = n.itens + n.contas
+  return {
+    ativos, itens: n.itens, contas: n.contas, dividas: n.dividas, aReceber: n.aReceber,
+    liquido: ativos - n.dividas, liquidoComReceber: ativos - n.dividas + n.aReceber,
+    porTipo, historico: historico.map(h => ({ ...h, liquido: h.ativos - h.dividas }))
+  }
 }
 
 // Status de uma conta a pagar. Paga se marcada, ou se venceu antes do "paguei" existir.
@@ -1216,7 +1398,7 @@ function semPin(u) {
 const _DONO = {
   gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
   receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
-  gastos_recorrentes: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
 }
 function familiaDoRegistro(tabela, id) {
   const tipo = _DONO[tabela]
@@ -1258,7 +1440,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1276,6 +1458,8 @@ function zerarNumerosFamilia(familiaId) {
 
 module.exports = {
   gerarBackup, zerarNumerosFamilia,
+  listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
+  listarPatrimonio, salvarPatrimonio, deletarPatrimonio, resumoPatrimonio,
   criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,
   criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,
