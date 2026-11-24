@@ -1101,6 +1101,7 @@ const TIPO_ICONE_CONTA = { corrente: '🏦', poupanca: '🐷', investimento: '�
 const CORES_CONTA = ['#2563eb','#16a34a','#7c3aed','#d97706','#0891b2','#db2777']
 
 async function carregarContas() {
+  renderTransferencias()
   try {
     const [contas, gastos] = await Promise.all([api('/contas' + famQ()), api('/gastos/recentes' + famQ())])
 
@@ -3215,7 +3216,7 @@ function renderDiaDetalhe() {
               if (i.atrasada) meta += ' · <span class="cal-tag-atrasada">vencida</span>'
               else if (!i.previsto) meta += ' · <span class="cal-tag-atrasada">vence hoje</span>'
               else meta += ' · <span class="cal-tag-prev">previsto</span>'
-              acao = `<button class="cp-paguei" onclick="${pare}marcarPaguei('${i.chave}', this)">Paguei</button>`
+              acao = `<button class="cp-paguei" onclick="${pare}marcarPaguei('${i.chave}', this, ${i.valor}, '${String(i.descricao).replace(/'/g, '')}')">Paguei</button>`
             }
           } else if (i.previsto) {
             meta += ' · <span class="cal-tag-prev">previsto</span>'
@@ -3300,7 +3301,7 @@ async function renderContasPagar() {
             <div class="cp-quando">${q.txt}</div>
           </div>
           <b class="cp-valor">${fmt(c.valor)}</b>
-          <button class="cp-paguei" onclick="marcarPaguei('${c.chave}', this)">Paguei</button>
+          <button class="cp-paguei" onclick="marcarPaguei('${c.chave}', this, ${c.valor}, '${String(c.descricao).replace(/'/g, '')}')">Paguei</button>
         </div>`
       }).join('')}
       <div class="cp-rodape" onclick="mostrarAba('agenda');navBtn('nav-agenda')">
@@ -3312,24 +3313,35 @@ async function renderContasPagar() {
   }
 }
 
-async function marcarPaguei(chave, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '…' }
+// "Paguei": pergunta de qual conta saiu, para o saldo dela já ficar certo.
+let pgAtual = null
+async function marcarPaguei(chave, btn, valor, descricao) {
+  pgAtual = { chave, valor: Number(valor) || 0, descricao: descricao || '' }
+  let contas = []
+  try { contas = await api('/contas' + famQ()) } catch (e) {}
+  document.getElementById('pg-desc').textContent = `${pgAtual.descricao}${pgAtual.valor ? ' · ' + fmt(pgAtual.valor) : ''}. De qual conta saiu o dinheiro?`
+  document.getElementById('pg-contas').innerHTML = contas.length && pgAtual.valor
+    ? contas.map(c => `<button class="pg-conta" onclick="confirmarPaguei(${c.id})"><span>🏦 ${escH(c.nome)}</span><small>saldo ${fmt(c.saldo)}</small></button>`).join('')
+    : '<div class="pg-vazio">Nenhuma conta cadastrada para descontar.</div>'
+  document.getElementById('modal-paguei').style.display = 'flex'
+}
+async function confirmarPaguei(contaId) {
+  if (!pgAtual) return
   try {
-    await api('/pagamentos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave, usuarioId: usuario.id }) })
-    toast('✅ Marcada como paga')
-    renderContasPagar()
+    await api('/pagamentos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chave: pgAtual.chave, usuarioId: usuario.id, contaId, valor: contaId ? pgAtual.valor : null }) })
+    fecharModal('modal-paguei')
+    toast(contaId ? '✅ Paga e descontada da conta' : '✅ Marcada como paga')
+    renderContasPagar(); renderLivre()
     if (document.getElementById('aba-agenda').style.display !== 'none') carregarAgenda()
-  } catch(e) {
-    toast('❌ ' + e.message, 'erro')
-    if (btn) { btn.disabled = false; btn.textContent = 'Paguei' }
-  }
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
 }
 
 async function desfazerPaguei(chave) {
   try {
     await api('/pagamentos', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave }) })
     toast('↩️ Voltou a ficar em aberto')
-    renderContasPagar()
+    renderContasPagar(); renderLivre()
     if (document.getElementById('aba-agenda').style.display !== 'none') carregarAgenda()
   } catch(e) { toast('❌ ' + e.message, 'erro') }
 }
@@ -3788,6 +3800,57 @@ async function renderLivre() {
   } catch (e) {
     el.style.display = 'none'
   }
+}
+
+// ── TRANSFERÊNCIAS (aba Contas) ──
+async function renderTransferencias() {
+  const el = document.getElementById('transferencias-lista')
+  if (!el) return
+  try {
+    const lista = await api('/transferencias' + famQ())
+    el.innerHTML = lista.length ? lista.map(t => `
+      <div class="tf-item">
+        <div class="tf-info">
+          <div class="tf-rota">${escH(t.de_nome || 'Fora do app')} → ${escH(t.para_nome || 'Fora do app')}</div>
+          <div class="tf-sub">${ddmmStr(String(t.data))}${t.descricao ? ' · ' + escH(t.descricao) : ''}</div>
+        </div>
+        <div class="tf-dir"><b>${fmt(t.valor)}</b><button class="cal-desfazer" onclick="desfazerTransferencia(${t.id})">desfazer</button></div>
+      </div>`).join('')
+      : '<div class="pt-vazio">Nenhuma transferência registrada. Use para Pix entre contas próprias ou para a família — assim não vira gasto.</div>'
+  } catch (e) { el.innerHTML = '' }
+}
+async function abrirModalTransferencia() {
+  // Destino pode ser conta de qualquer pessoa da família (ex.: Pix para a Leide).
+  const contas = await api('/contas?familiaId=' + famId())
+  const meus = contas.filter(c => Number(c.usuario_id) === Number(usuario.id))
+  const opt = c => `<option value="${c.id}">${escH(c.nome)}${c.usuario_nome && Number(c.usuario_id) !== Number(usuario.id) ? ' (' + escH(c.usuario_nome) + ')' : ''}</option>`
+  document.getElementById('tf-de').innerHTML = (meus.length ? meus : contas).map(opt).join('') + '<option value="">Fora do app</option>'
+  document.getElementById('tf-para').innerHTML = contas.map(opt).join('') + '<option value="">Fora do app</option>'
+  if (contas.length > 1) document.getElementById('tf-para').selectedIndex = 1
+  document.getElementById('tf-valor').value = ''
+  document.getElementById('tf-desc').value = ''
+  document.getElementById('tf-data').value = hojeLocalBR()
+  document.getElementById('modal-transferencia').style.display = 'flex'
+}
+async function salvarTransferencia() {
+  const deContaId = document.getElementById('tf-de').value || null
+  const paraContaId = document.getElementById('tf-para').value || null
+  const valor = parseBRL(document.getElementById('tf-valor').value)
+  if (!(valor > 0)) { toast('Informe o valor', 'erro'); return }
+  if (!deContaId && !paraContaId) { toast('Escolha pelo menos uma conta', 'erro'); return }
+  if (deContaId && deContaId === paraContaId) { toast('Escolha contas diferentes', 'erro'); return }
+  try {
+    await api('/transferencias', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      usuarioId: usuario.id, deContaId, paraContaId, valor, data: document.getElementById('tf-data').value, descricao: document.getElementById('tf-desc').value.trim() }) })
+    fecharModal('modal-transferencia')
+    toast('✅ Transferência registrada')
+    carregarContas(); renderLivre()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function desfazerTransferencia(id) {
+  if (!confirm('Desfazer esta transferência? Os saldos das contas voltam como estavam.')) return
+  await api('/transferencias/' + id, { method: 'DELETE' })
+  carregarContas(); renderLivre()
 }
 
 // ── START ──

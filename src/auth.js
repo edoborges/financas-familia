@@ -18,7 +18,7 @@ const TABELAS = {
   receitas: 'receitas', orcamentos: 'orcamentos', recorrentes: 'gastos_recorrentes',
   usuarios: 'usuarios', familias: 'familias',
   recebiveis: 'recebiveis', patrimonio: 'patrimonio',
-  'creditos-fatura': 'fatura_creditos'
+  'creditos-fatura': 'fatura_creditos', transferencias: 'transferencias'
 }
 // Chave de pagamento ('fatura:2:2026-12-05') → tabela do item pago.
 const CHAVES = { fatura: 'cartoes', recorrente: 'gastos_recorrentes', emprestimo: 'emprestimos' }
@@ -53,7 +53,7 @@ function exigirLogin(req, res, next) {
   if (vazio(req.query.familiaId)) req.query.familiaId = String(fam)
 
   // Pessoa, conta e cartão citados no pedido têm que ser da mesma família.
-  const referencias = [['usuarioId', 'usuarios'], ['contaId', 'contas'], ['cartaoId', 'cartoes'], ['patrimonioId', 'patrimonio']]
+  const referencias = [['usuarioId', 'usuarios'], ['contaId', 'contas'], ['cartaoId', 'cartoes'], ['patrimonioId', 'patrimonio'], ['deContaId', 'contas'], ['paraContaId', 'contas']]
   for (const fonte of [req.query, corpo]) {
     for (const [campo, tabela] of referencias) {
       if (vazio(fonte[campo])) continue

@@ -246,6 +246,19 @@ db.exec(`
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Dinheiro que muda de conta sem ser gasto nem receita (Pix entre contas próprias,
+  -- para o cônjuge, da PJ para a pessoal).
+  CREATE TABLE IF NOT EXISTS transferencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    de_conta_id INTEGER,
+    para_conta_id INTEGER,
+    valor REAL NOT NULL,
+    data DATE NOT NULL,
+    descricao TEXT DEFAULT '',
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
   -- por ninguém.
   CREATE TABLE IF NOT EXISTS sessoes (
@@ -272,6 +285,9 @@ try { db.exec("ALTER TABLE receitas_programadas ADD COLUMN estimada INTEGER DEFA
 try { db.exec("ALTER TABLE gastos_recorrentes ADD COLUMN cartao_id INTEGER") } catch(e) {}
 // Consignado: a parcela sai do salário antes de cair na conta, então não vira conta a pagar.
 try { db.exec("ALTER TABLE emprestimos ADD COLUMN desconto_folha INTEGER DEFAULT 0") } catch(e) {}
+// "Paguei" pode descontar de uma conta: guarda de qual e quanto, para o desfazer devolver.
+try { db.exec("ALTER TABLE pagamentos ADD COLUMN conta_id INTEGER") } catch(e) {}
+try { db.exec("ALTER TABLE pagamentos ADD COLUMN valor REAL") } catch(e) {}
 // Limite do cheque especial da conta (para o alerta de estouro).
 try { db.exec("ALTER TABLE contas ADD COLUMN limite REAL DEFAULT 0") } catch(e) {}
 
@@ -789,11 +805,61 @@ if (!obterConfig('pagamentos_desde')) salvarConfig('pagamentos_desde', hojeBR())
 function chavesPagas() {
   return new Set(db.prepare('SELECT chave FROM pagamentos').all().map(r => r.chave))
 }
-function marcarPago(chave, usuarioId = null) {
-  return db.prepare('INSERT OR IGNORE INTO pagamentos (chave, usuario_id) VALUES (?, ?)').run(chave, usuarioId)
+// Com contaId e valor, o pagamento também sai do saldo daquela conta.
+function marcarPago(chave, usuarioId = null, contaId = null, valor = null) {
+  const v = Number(valor) > 0 ? Math.round(Number(valor) * 100) / 100 : null
+  const cid = contaId && v ? contaId : null
+  db.exec('BEGIN')
+  try {
+    const r = db.prepare('INSERT OR IGNORE INTO pagamentos (chave, usuario_id, conta_id, valor) VALUES (?, ?, ?, ?)').run(chave, usuarioId, cid, cid ? v : null)
+    if (r.changes && cid) db.prepare('UPDATE contas SET saldo = saldo - ? WHERE id = ?').run(v, cid)
+    db.exec('COMMIT')
+    return r
+  } catch (e) { db.exec('ROLLBACK'); throw e }
 }
 function desmarcarPago(chave) {
-  return db.prepare('DELETE FROM pagamentos WHERE chave = ?').run(chave)
+  const p = db.prepare('SELECT * FROM pagamentos WHERE chave = ?').get(chave)
+  db.exec('BEGIN')
+  try {
+    if (p && p.conta_id && p.valor) db.prepare('UPDATE contas SET saldo = saldo + ? WHERE id = ?').run(p.valor, p.conta_id)
+    const r = db.prepare('DELETE FROM pagamentos WHERE chave = ?').run(chave)
+    db.exec('COMMIT')
+    return r
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+}
+
+// ===== TRANSFERÊNCIAS =====
+function registrarTransferencia(usuarioId, { deContaId, paraContaId, valor, data, descricao }) {
+  const v = Math.round(Number(valor) * 100) / 100
+  db.exec('BEGIN')
+  try {
+    const id = Number(db.prepare('INSERT INTO transferencias (usuario_id, de_conta_id, para_conta_id, valor, data, descricao) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(usuarioId, deContaId || null, paraContaId || null, v, data || hojeBR(), descricao || '').lastInsertRowid)
+    if (deContaId) db.prepare('UPDATE contas SET saldo = saldo - ? WHERE id = ?').run(v, deContaId)
+    if (paraContaId) db.prepare('UPDATE contas SET saldo = saldo + ? WHERE id = ?').run(v, paraContaId)
+    db.exec('COMMIT')
+    return id
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+}
+function desfazerTransferencia(id) {
+  const t = db.prepare('SELECT * FROM transferencias WHERE id = ?').get(id)
+  if (!t) return null
+  db.exec('BEGIN')
+  try {
+    if (t.de_conta_id) db.prepare('UPDATE contas SET saldo = saldo + ? WHERE id = ?').run(t.valor, t.de_conta_id)
+    if (t.para_conta_id) db.prepare('UPDATE contas SET saldo = saldo - ? WHERE id = ?').run(t.valor, t.para_conta_id)
+    db.prepare('DELETE FROM transferencias WHERE id = ?').run(id)
+    db.exec('COMMIT')
+    return t
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+}
+function listarTransferencias(familiaId = null, usuarioId = null) {
+  const base = `SELECT t.*, u.nome AS usuario_nome, cd.nome AS de_nome, cp.nome AS para_nome FROM transferencias t
+    JOIN usuarios u ON u.id = t.usuario_id LEFT JOIN contas cd ON cd.id = t.de_conta_id LEFT JOIN contas cp ON cp.id = t.para_conta_id`
+  // Na visão pessoal entra o que saiu ou chegou numa conta da pessoa.
+  if (usuarioId) return db.prepare(`${base} WHERE t.usuario_id = ? OR cd.usuario_id = ? OR cp.usuario_id = ? ORDER BY t.data DESC, t.id DESC LIMIT 30`).all(usuarioId, usuarioId, usuarioId)
+  if (familiaId) return db.prepare(`${base} WHERE u.familia_id = ? ORDER BY t.data DESC, t.id DESC LIMIT 30`).all(familiaId)
+  return []
 }
 
 // O mesmo aparelho pode trocar de usuário (Ed sai, Leide entra): o endpoint é a identidade.
@@ -1418,7 +1484,7 @@ function semPin(u) {
 const _DONO = {
   gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
   receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
-  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', transferencias: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
 }
 function familiaDoRegistro(tabela, id) {
   const tipo = _DONO[tabela]
@@ -1513,7 +1579,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1530,6 +1596,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
+  registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
   listarPatrimonio, salvarPatrimonio, deletarPatrimonio, resumoPatrimonio,

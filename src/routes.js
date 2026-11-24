@@ -319,6 +319,24 @@ router.get('/livre-para-gastar', (req, res) => {
   } catch (e) { res.status(500).json({ erro: e.message }) }
 })
 
+// ===== TRANSFERÊNCIAS =====
+router.get('/transferencias', (req, res) => {
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarTransferencias(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+})
+router.post('/transferencias', (req, res) => {
+  try {
+    const { usuarioId, deContaId, paraContaId, valor, data, descricao } = req.body
+    if (!usuarioId || !(Number(valor) > 0) || (!deContaId && !paraContaId)) return res.status(400).json({ erro: 'Informe valor e pelo menos uma conta' })
+    if (deContaId && paraContaId && Number(deContaId) === Number(paraContaId)) return res.status(400).json({ erro: 'Escolha contas diferentes' })
+    const id = db.registrarTransferencia(parseInt(usuarioId), { deContaId: deContaId ? parseInt(deContaId) : null, paraContaId: paraContaId ? parseInt(paraContaId) : null, valor, data: dataOk(data) ? data : null, descricao: descricao ? String(descricao).slice(0, 80) : '' })
+    res.json({ ok: true, id })
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/transferencias/:id', (req, res) => {
+  res.json({ ok: !!db.desfazerTransferencia(parseInt(req.params.id)) })
+})
+
 // ===== VALORES A RECEBER =====
 const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
 router.get('/recebiveis', (req, res) => {
@@ -941,9 +959,9 @@ router.get('/contas-a-pagar', (req, res) => {
 
 router.post('/pagamentos', (req, res) => {
   try {
-    const { chave, usuarioId } = req.body
+    const { chave, usuarioId, contaId, valor } = req.body
     if (!chave) return res.status(400).json({ erro: 'Informe a conta' })
-    db.marcarPago(String(chave), usuarioId ? parseInt(usuarioId) : null)
+    db.marcarPago(String(chave), usuarioId ? parseInt(usuarioId) : null, contaId ? parseInt(contaId) : null, valor)
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
