@@ -1041,3 +1041,8 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
   .header-right{gap:5px;flex-shrink:0}
   .header-right button{padding:6px 7px !important;min-width:0 !important;width:auto !important}
 }
+
+/* Chave Só eu / Família no cartão de saldo */
+.visao-seg{display:inline-flex;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:2px;cursor:pointer;user-select:none}
+.visao-seg span{font-size:.7rem;font-weight:700;padding:4px 10px;border-radius:18px;color:rgba(255,255,255,.55);transition:all .2s;white-space:nowrap}
+.visao-seg span.on{background:#6366f1;color:#fff}

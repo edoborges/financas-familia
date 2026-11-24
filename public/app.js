@@ -6,7 +6,13 @@ let graficoInstance = null
 let metaEmojiSel = '🎯'
 let receitaTipoSel = 'Atendimento'
 let adminVisualizandoFamiliaId = null  // quando super_admin está vendo uma família
-let visaoAtual = localStorage.getItem('fin_visao') || 'pessoal' // 'pessoal' | 'consolidado'
+// 'pessoal' | 'consolidado'. Guardada por usuário (no computador compartilhado, a escolha
+// de um não muda a do outro). Sempre começa em 'pessoal' até a pessoa escolher Família.
+let visaoAtual = 'pessoal'
+const chaveVisao = () => 'fin_visao_' + (usuario?.id || 'x')
+function carregarVisao() {
+  try { visaoAtual = localStorage.getItem(chaveVisao()) === 'consolidado' ? 'consolidado' : 'pessoal' } catch(e) { visaoAtual = 'pessoal' }
+}
 
 // Retorna o familiaId ativo: da família que o admin está visualizando, ou do próprio usuário
 function famId() {
@@ -41,22 +47,22 @@ function famQAnd() {
 // Toggle pessoal ↔ consolidado
 function toggleVisao() {
   visaoAtual = visaoAtual === 'pessoal' ? 'consolidado' : 'pessoal'
-  localStorage.setItem('fin_visao', visaoAtual)
+  try { localStorage.setItem(chaveVisao(), visaoAtual) } catch(e) {}
   atualizarBadgeVisao()
   carregarInicio()
 }
+// Chave com as duas opções à vista; a ativa fica destacada.
 function atualizarBadgeVisao() {
   const badge = document.getElementById('b-visao-badge')
   const btnH = document.getElementById('btn-visao')
   if (!badge) return
-  if (visaoAtual === 'pessoal') {
-    badge.textContent = '👤 Pessoal'
-    badge.className = 'visao-badge pessoal'
-    if (btnH) btnH.title = 'Visão pessoal — clique para ver da família'
-  } else {
-    badge.textContent = '👨‍👩‍👧 Família'
-    badge.className = 'visao-badge consolidado'
-    if (btnH) btnH.title = 'Visão da família — clique para ver só a sua'
+  const eu = visaoAtual === 'pessoal'
+  badge.className = 'visao-seg'
+  badge.title = eu ? 'Mostrando só os seus dados. Toque para ver a família.' : 'Mostrando a família toda. Toque para ver só os seus.'
+  badge.innerHTML = `<span class="${eu ? 'on' : ''}">👤 Só eu</span><span class="${eu ? '' : 'on'}">👨‍👩‍👧 Família</span>`
+  if (btnH) {
+    btnH.textContent = eu ? '👤' : '👨‍👩‍👧'
+    btnH.title = badge.title
   }
 }
 
@@ -364,6 +370,7 @@ async function salvarPerfil() {
 
 // ── APP ──
 async function mostrarApp() {
+  carregarVisao()
   show('app')
   document.getElementById('painel-admin').style.display = 'none'
   document.getElementById('app-main').style.display = ''
@@ -3342,7 +3349,9 @@ async function atualizarBotaoAvisos() {
   // Cartão de convite no topo do Início: some quando já está ativo. No iPhone antigo continua
   // aparecendo para o modal explicar que precisa atualizar o iOS.
   const convite = document.getElementById('push-convite')
-  const esconder = estado === 'ativo' || (estado === 'sem-suporte' && !ehIOS())
+  // No computador o convite só atrapalha: os avisos são para o celular.
+  const ehCelular = window.matchMedia('(pointer: coarse)').matches
+  const esconder = !ehCelular || estado === 'ativo' || (estado === 'sem-suporte' && !ehIOS())
   if (convite) convite.style.display = esconder ? 'none' : 'flex'
   const btn = document.getElementById('btn-avisos')
   if (!btn) return
