@@ -374,6 +374,20 @@ router.delete('/patrimonio/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Pagamento antecipado / estorno que abate uma fatura (cartão + data de vencimento).
+router.post('/creditos-fatura', (req, res) => {
+  const { cartaoId, vencimento, valor, data, descricao } = req.body
+  const v = Math.round(Number(valor) * 100) / 100
+  if (!cartaoId || !dataOk(vencimento) || !(v > 0)) return res.status(400).json({ erro: 'Informe cartão, vencimento e valor' })
+  const id = db.registrarCreditoFatura(parseInt(cartaoId), vencimento, v, dataOk(data) ? data : null, descricao ? String(descricao).slice(0, 80) : null)
+  if (!id) return res.status(404).json({ erro: 'Cartão não encontrado' })
+  res.json({ ok: true, id })
+})
+router.delete('/creditos-fatura/:id', (req, res) => {
+  db.removerCreditoFatura(parseInt(req.params.id))
+  res.json({ ok: true })
+})
+
 // Editar cartão (nome, limite, dia de fechamento e de vencimento).
 router.put('/cartoes/:id', (req, res) => {
   const c = db.editarCartao(parseInt(req.params.id), req.body || {})

@@ -17,7 +17,8 @@ const TABELAS = {
   emprestimos: 'emprestimos', 'receitas-programadas': 'receitas_programadas',
   receitas: 'receitas', orcamentos: 'orcamentos', recorrentes: 'gastos_recorrentes',
   usuarios: 'usuarios', familias: 'familias',
-  recebiveis: 'recebiveis', patrimonio: 'patrimonio'
+  recebiveis: 'recebiveis', patrimonio: 'patrimonio',
+  'creditos-fatura': 'fatura_creditos'
 }
 // Chave de pagamento ('fatura:2:2026-12-05') → tabela do item pago.
 const CHAVES = { fatura: 'cartoes', recorrente: 'gastos_recorrentes', emprestimo: 'emprestimos' }

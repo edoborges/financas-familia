@@ -3235,7 +3235,8 @@ function renderDiaDetalhe() {
           return `<details class="cal-fatura">
             <summary>${linha}</summary>
             <div class="cal-fatura-compras">
-              ${i.compras.map(c => `<div><span>${ddmm(c.data)} · ${c.descricao}</span><b>${fmt(c.valor)}</b></div>`).join('')}
+              ${i.compras.map(c => `<div><span>${ddmm(c.data)} · ${c.descricao}</span><b${c.valor < 0 ? ' style="color:#10b981"' : ''}>${c.valor < 0 ? '−' + fmt(-c.valor) : fmt(c.valor)}${c.creditoId ? ` <button class="cal-desfazer" onclick="removerCreditoFatura(${c.creditoId})">✕</button>` : ''}</b></div>`).join('')}
+              <button class="cal-antecipar" onclick="registrarCreditoFatura(${i.cartaoId}, '${i.data}')">💵 Paguei parte antes / estorno</button>
             </div>
           </details>`
         }).join('')
@@ -3735,6 +3736,24 @@ async function desfazerRecebi(ev, id) {
   if (!confirm('Desfazer este recebimento? Se o valor foi somado num item do patrimônio, ele sai de lá.')) return
   await api(`/recebiveis/${id}/recebi`, { method: 'DELETE' })
   renderRecebiveis(); renderPatrimonio()
+}
+
+// ── Pagamento antecipado / estorno que abate uma fatura (Agenda) ──
+async function registrarCreditoFatura(cartaoId, vencimento) {
+  const txt = prompt('Quanto você já pagou (ou foi estornado) desta fatura?\n\nO valor sai do total que ainda vai vencer.')
+  if (txt === null) return
+  const valor = parseBRL(txt)
+  if (!(valor > 0)) { toast('Valor inválido', 'erro'); return }
+  try {
+    await api('/creditos-fatura', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cartaoId, vencimento, valor }) })
+    toast('✅ Fatura abatida')
+    carregarAgenda(); renderContasPagar()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function removerCreditoFatura(id) {
+  if (!confirm('Remover este abatimento da fatura?')) return
+  await api('/creditos-fatura/' + id, { method: 'DELETE' })
+  carregarAgenda(); renderContasPagar()
 }
 
 // ── START ──

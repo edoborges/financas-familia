@@ -234,6 +234,18 @@ db.exec(`
     PRIMARY KEY (usuario_id, mes)
   );
 
+  -- Pagamento antecipado (ou estorno) que abate uma fatura específica do cartão.
+  CREATE TABLE IF NOT EXISTS fatura_creditos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    cartao_id INTEGER NOT NULL,
+    vencimento DATE NOT NULL,
+    valor REAL NOT NULL,
+    data DATE,
+    descricao TEXT DEFAULT 'Pagamento antecipado',
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
   -- por ninguém.
   CREATE TABLE IF NOT EXISTS sessoes (
@@ -876,9 +888,15 @@ function _faturasDoMes(familiaId, usuarioId, y, m, cartoes) {
       grupos.get(chave).compras.push({ data: c.data, descricao: c.descricao, valor: c.valor })
     }
   }
+  // Pagamentos antecipados/estornos entram como valor negativo na própria fatura.
+  const creditos = db.prepare(`SELECT * FROM fatura_creditos WHERE strftime('%Y-%m', vencimento) = ?`).all(alvo)
+  for (const cr of creditos) {
+    const g = grupos.get(`${cr.cartao_id}|${String(cr.vencimento).slice(0, 10)}`)
+    if (g) g.compras.push({ data: String(cr.data || cr.vencimento).slice(0, 10), descricao: `💵 ${cr.descricao}`, valor: -Number(cr.valor), creditoId: cr.id })
+  }
   return [...grupos.values()].map(f => ({
-    data: f.data, tipo: 'saida', descricao: `Fatura ${f.cartao.nome}`,
-    valor: +f.compras.reduce((acc, c) => acc + c.valor, 0).toFixed(2),
+    data: f.data, tipo: 'saida', descricao: `Fatura ${f.cartao.nome}`, cartaoId: f.cartao.id,
+    valor: +Math.max(0, f.compras.reduce((acc, c) => acc + c.valor, 0)).toFixed(2),
     categoria: 'Fatura', fonte: 'fatura', conta: true, chave: `fatura:${f.cartao.id}:${f.data}`,
     compras: f.compras.sort((a, b) => a.data.localeCompare(b.data))
   }))
@@ -1398,7 +1416,7 @@ function semPin(u) {
 const _DONO = {
   gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
   receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
-  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
 }
 function familiaDoRegistro(tabela, id) {
   const tipo = _DONO[tabela]
@@ -1412,6 +1430,16 @@ function familiaDoRegistro(tabela, id) {
     LEFT JOIN usuarios us ON us.id = t.usuario_id WHERE t.id = ?`).get(id)
   if (!r) return undefined
   return r.u == null ? null : r.f
+}
+
+function registrarCreditoFatura(cartaoId, vencimento, valor, data, descricao) {
+  const c = db.prepare('SELECT usuario_id FROM cartoes WHERE id = ?').get(cartaoId)
+  if (!c) return null
+  return Number(db.prepare('INSERT INTO fatura_creditos (usuario_id, cartao_id, vencimento, valor, data, descricao) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(c.usuario_id, cartaoId, vencimento, valor, data || hojeBR(), descricao || 'Pagamento antecipado').lastInsertRowid)
+}
+function removerCreditoFatura(id) {
+  return db.prepare('DELETE FROM fatura_creditos WHERE id = ?').run(id)
 }
 
 // Cópia consistente do banco inteiro num arquivo temporário (funciona com o app rodando).
@@ -1440,7 +1468,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1457,7 +1485,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
-  gerarBackup, zerarNumerosFamilia,
+  gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
   listarPatrimonio, salvarPatrimonio, deletarPatrimonio, resumoPatrimonio,
   criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,
