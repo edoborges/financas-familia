@@ -1478,14 +1478,16 @@ function resumoFinanceiro(familiaId = null, usuarioId = null) {
   const rendaBase = temProgramadas ? rendaProgramada : salarioTotal
   const rendaTotal = rendaBase + Number(receitasExtras || 0)
 
-  const cartoes = listarCartoes(familiaId, usuarioId)
+  // Mesmo cálculo da aba Cartões: próxima fatura e limite usado a partir dos lançamentos.
+  const cartoes = enriquecerCartoes(listarCartoes(familiaId, usuarioId))
   const contas = listarContas(familiaId, usuarioId)
   const metas = listarMetas(familiaId)
   const categorias = gastosPorCategoria(null, null, familiaId, usuarioId)
   const evolucao = gastosPorMes(6, familiaId, usuarioId)
   const saldoContas = contas.reduce((a, c) => a + c.saldo, 0)
-  const emprestimos = listarEmprestimos(familiaId)
-  const totalEmDividas = totalDividas(familiaId)
+  // Na visão "Só eu", só as dívidas da pessoa.
+  const emprestimos = listarEmprestimos(familiaId, usuarioId)
+  const totalEmDividas = emprestimos.reduce((a, e) => a + Math.max(0, Number(e.valor_total) - Number(e.valor_pago)), 0)
   const projecao = projecaoGastosMeses(4, familiaId, usuarioId)
   return { salarioTotal, rendaProgramada, rendaTotal, receitasExtras: Number(receitasExtras || 0), gastosMes, saldoDisponivel: rendaTotal - gastosMes, saldoContas, cartoes, contas, metas, categorias, usuarios, evolucao, emprestimos, totalEmDividas, projecao, receitasProgramadas }
 }

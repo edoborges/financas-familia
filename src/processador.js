@@ -45,8 +45,8 @@ async function processarMensagem(usuarioId, mensagem) {
     }
   }
 
-  const cartoes = db.listarCartoes(usuario.id)
-  const contas = db.listarContas(usuario.id)
+  const cartoes = db.listarCartoes(null, usuario.id)
+  const contas = db.listarContas(null, usuario.id)
   const { total: gastosMes } = db.totalGastosMes(usuario.id)
 
   // Detecção direta por regex (mais rápido e confiável que IA para esses casos)
@@ -194,7 +194,7 @@ async function executarAcao(resultado, usuario) {
     }
 
     case 'conta': {
-      const contas = db.listarContas(usuario.id)
+      const contas = db.listarContas(null, usuario.id)
       const banco = resultado.banco || ''
       const valor = resultado.valor || 0
       if (!valor) return { resposta: resultado.resposta || 'Valor não identificado.', tipo: 'info' }
@@ -222,7 +222,7 @@ async function executarAcao(resultado, usuario) {
     }
 
     case 'cartao_fatura': {
-      const cartoes = db.listarCartoes(usuario.id)
+      const cartoes = db.listarCartoes(null, usuario.id)
       const nomeCartao = resultado.nome_cartao || ''
       const valor = resultado.valor || 0
       const cartao = cartoes.find(c => c.nome.toLowerCase().includes(nomeCartao.toLowerCase()))
@@ -287,7 +287,7 @@ function formatarResumo(usuario) {
   const { total: gastosMes } = db.totalGastosMes(usuario.id)
   const saldo = usuario.salario - gastosMes
   const pct = usuario.salario > 0 ? ((gastosMes / usuario.salario) * 100).toFixed(0) : 0
-  const cartoes = db.listarCartoes(usuario.id)
+  const cartoes = db.listarCartoes(null, usuario.id)
   const categorias = db.gastosPorCategoria()
 
   let msg = `📊 *Resumo de ${usuario.nome}*\n`
@@ -342,7 +342,7 @@ function formatarMetas() {
 }
 
 function formatarCartoes(usuarioId) {
-  const cartoes = db.listarCartoes(usuarioId)
+  const cartoes = db.enriquecerCartoes(db.listarCartoes(null, usuarioId))
   if (!cartoes.length) return '💳 Nenhum cartão.\n\nCadastre um:\n"Cartão Nubank limite R$3000"'
 
   let msg = `💳 *Seus Cartões:*\n\n`
