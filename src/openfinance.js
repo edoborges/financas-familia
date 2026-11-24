@@ -63,9 +63,10 @@ function categoriaSugerida(descricao, categoriaPluggy) {
 const ehPagamentoFatura = (t) => /pagamento de fatura|fatura|cartoes caixa|credit card payment|pagamento cartao/.test(semAcento(`${t.descricao} ${t.categoriaPluggy || ''} ${t.operacao || ''}`))
   || /nu pagamentos|picpay|neon pagamentos|mercado pago|cartoes caixa/.test(semAcento(t.contraparte || ''))
 const ehTransferenciaPropria = (t, nomesFamilia) => {
-  const cp = semAcento(t.contraparte || '')
+  const cp = semAcento(`${t.contraparte || ''} ${String(t.descricao || '').split('|').slice(1).join(' ')}`)
   if (/same person|mesma titularidade|transferencia entre contas/.test(semAcento(`${t.categoriaPluggy || ''} ${t.descricao}`))) return true
-  return cp && nomesFamilia.some(n => n.length >= 4 && cp.includes(n))
+  // Nome completo (2+ palavras) ou o primeiro nome do cadastro, quando tem 4+ letras.
+  return nomesFamilia.some(n => n.length >= 4 && cp.includes(n))
 }
 
 // Sugere o que um movimento de CONTA é. (Compras de cartão não passam por aqui.)
@@ -101,13 +102,15 @@ function aplicar(txId, { acao, categoria, chavePagamento, tipoReceita }) {
       db.ofDB.confirmarGastoFixo(fixo.id, valor, t.data, null)
       db.ofDB.marcarTx(txId, { status: 'aplicada', aplicadaComo: 'gasto_fixo', gastoId: fixo.id })
     } else {
+      const recorrente = db.ofDB.recorrenteParecido(t.usuario_id, t.conta_tipo === 'CREDIT' ? t.cartao_id : null, t.data, valor)
       const gastoId = db.ofDB.inserirGasto({
         usuarioId: t.usuario_id, cartaoId: t.conta_tipo === 'CREDIT' ? t.cartao_id : null, contaId: t.conta_tipo === 'BANK' ? t.conta_id : null,
         descricao: t.descricao, valor, categoria: categoria || t.sugestao_categoria || 'Outros', data: t.data,
         formaPagamento: t.conta_tipo === 'CREDIT' ? 'credito' : (t.metodo === 'PIX' ? 'pix' : t.metodo === 'BOLETO' ? 'boleto' : 'debito'),
         parcelas: t.parcelas || 1, parcelaAtual: t.parcela_atual || 1
       })
-      db.ofDB.marcarTx(txId, { status: 'aplicada', aplicadaComo: 'gasto', gastoId })
+      if (recorrente) db.ofDB.ligarRecorrente(gastoId, recorrente.id)
+      db.ofDB.marcarTx(txId, { status: 'aplicada', aplicadaComo: recorrente ? 'gasto_fixo' : 'gasto', gastoId })
     }
   } else if (acao === 'receita') {
     const r = db.registrarReceita(t.usuario_id, valor, t.descricao, t.data, tipoReceita || t.sugestao_categoria || 'outro')
@@ -190,7 +193,7 @@ async function sincronizarItem(itemId) {
           categoriaPluggy: tx.category, contraparte, metodo: pd.paymentMethod, operacao: tx.operationType,
           parcelaAtual: meta.installmentNumber, parcelas: meta.totalInstallments
         }
-        if (base.parcelas > 1 && base.parcelaAtual) base.descricao = `${base.descricao} (${base.parcelaAtual}/${base.parcelas})`
+        if (base.parcelas > 1 && base.parcelaAtual && !base.descricao.includes(`${base.parcelaAtual}/${base.parcelas}`)) base.descricao = `${base.descricao} (${base.parcelaAtual}/${base.parcelas})`
 
         let decisao
         if (ehCartao) {
@@ -212,11 +215,12 @@ async function sincronizarItem(itemId) {
         resumo.novos++
 
         // Compra de cartão já lançada à mão (mesmo cartão, data e valor): não duplica.
-        const duplicada = ehCartao && direcao === 'saida' && db.ofDB.gastoIgual(item.usuario_id, oc.cartao_id, base.data, valor)
+        const igual = ehCartao && direcao === 'saida' ? db.ofDB.gastoMesmaFatura(item.usuario_id, oc.cartao_id, base.data, valor) : null
+        const duplicada = !!igual
         // Automático: compra no cartão, ou qualquer movimento que já tem regra aprendida.
         const automatico = !duplicada && ((ehCartao && direcao === 'saida') || (regra && regra.acao !== 'pagamento'))
         if (duplicada) {
-          db.ofDB.marcarTx(tx.id, { status: 'ignorada', aplicadaComo: 'duplicada' })
+          db.ofDB.marcarTx(tx.id, { status: 'ignorada', aplicadaComo: 'duplicada', gastoId: igual.id })
         } else if (automatico) {
           aplicar(tx.id, { acao: decisao.sugestao, categoria: decisao.sugestaoCategoria })
           resumo.automaticos++

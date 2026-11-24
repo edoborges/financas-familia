@@ -1675,8 +1675,25 @@ const ofDB = {
   inserirGasto: (g) => Number(db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, data_gasto, parcelas, parcela_atual, origem)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openfinance')`).run(g.usuarioId, g.cartaoId || null, g.contaId || null, g.descricao, g.valor, g.categoria || 'Outros',
       g.formaPagamento || (g.cartaoId ? 'credito' : 'debito'), g.data, g.parcelas || 1, g.parcelaAtual || 1).lastInsertRowid),
-  gastoIgual: (usuarioId, cartaoId, data, valor) => !!db.prepare('SELECT 1 FROM gastos WHERE usuario_id = ? AND COALESCE(cartao_id, 0) = ? AND date(data_gasto) = ? AND ROUND(valor, 2) = ROUND(?, 2)')
-    .get(usuarioId, cartaoId || 0, data, valor),
+  // Mesma compra já lançada: mesmo cartão, mesma fatura e valor a poucos centavos. O banco manda
+  // parcelas futuras com dia e centavos diferentes dos da fatura em CSV, por isso não dá para
+  // exigir data e valor idênticos. Cada gasto só "casa" com um movimento importado.
+  gastoMesmaFatura: (usuarioId, cartaoId, data, valor) => {
+    const c = db.prepare('SELECT dia_fechamento, dia_vencimento FROM cartoes WHERE id = ?').get(cartaoId)
+    if (!c) return null
+    const alvo = vencimentoFatura(data, c.dia_fechamento, c.dia_vencimento)
+    const candidatos = db.prepare(`SELECT g.id, g.data_gasto FROM gastos g WHERE g.usuario_id = ? AND g.cartao_id = ? AND ABS(g.valor - ?) <= ?
+      AND ABS(julianday(g.data_gasto) - julianday(?)) <= 45 AND g.id NOT IN (SELECT gasto_id FROM of_transacoes WHERE gasto_id IS NOT NULL)
+      ORDER BY ABS(julianday(g.data_gasto) - julianday(?))`).all(usuarioId, cartaoId, valor, Math.max(0.05, valor * 0.01), data, data)
+    return candidatos.find(g => vencimentoFatura(String(g.data_gasto).slice(0, 10), c.dia_fechamento, c.dia_vencimento) === alvo) || null
+  },
+  // Gasto fixo (assinatura, conta) de valor parecido que ainda não tem gasto neste mês: o movimento
+  // do banco É esse gasto fixo; ligando pelo recorrente_id, o app não gera outro no dia.
+  recorrenteParecido: (usuarioId, cartaoId, data, valor) => db.prepare(`SELECT r.* FROM gastos_recorrentes r WHERE r.usuario_id = ? AND r.ativa = 1
+    AND COALESCE(r.cartao_id, 0) = ? AND ABS(r.valor - ?) <= ? * 0.15
+    AND NOT EXISTS (SELECT 1 FROM gastos g WHERE g.recorrente_id = r.id AND strftime('%Y-%m', g.data_gasto) = ?)
+    ORDER BY ABS(r.valor - ?) LIMIT 1`).get(usuarioId, cartaoId || 0, valor, valor, String(data).slice(0, 7), valor),
+  ligarRecorrente: (gastoId, recorrenteId) => db.prepare('UPDATE gastos SET recorrente_id = ? WHERE id = ?').run(recorrenteId, gastoId),
   usuariosDaFamilia: (familiaId) => db.prepare('SELECT id, nome FROM usuarios WHERE familia_id = ?').all(familiaId)
 }
 
