@@ -204,8 +204,14 @@ async function sincronizarItem(itemId) {
         let decisao
         if (ehCartao) {
           // Pagamento da fatura dentro do cartão: não é gasto nem receita.
-          if (direcao === 'entrada' && (tx.operationType === 'PAGAMENTO_FATURA' || /pagamento|payment/.test(semAcento(tx.description)))) {
+          if (direcao === 'entrada' && (tx.operationType === 'PAGAMENTO_FATURA' || /pagamento|payment|pgto/.test(semAcento(tx.description)))) {
             db.ofDB.inserirTx({ ...base, status: 'ignorada', sugestao: 'pagamento' })
+            resumo.novos++
+            continue
+          }
+          // Linhas informativas do extrato do cartão (ex.: Caixa "TOTAL DA FATURA ANTERIOR"): não são compra.
+          if (/total da fatura anterior|saldo da fatura anterior|saldo anterior|fatura anterior/.test(semAcento(tx.description))) {
+            db.ofDB.inserirTx({ ...base, status: 'ignorada', sugestao: 'ignorar' })
             resumo.novos++
             continue
           }
