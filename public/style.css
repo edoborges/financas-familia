@@ -1193,3 +1193,5 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .mn-noticia span{display:block;font-size:.68rem;color:#64748b;margin-top:2px}
 .mn-extra .rv-btn{margin-top:8px}
 .iv-abas button{font-size:.64rem}
+
+.cf-futuras{font-size:.7rem;opacity:.85;margin-top:8px;color:#fff}

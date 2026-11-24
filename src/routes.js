@@ -298,7 +298,7 @@ router.get('/gastos/evolucao', (req, res) => {
 
 router.get('/cartoes', (req, res) => {
   const { familiaId, usuarioId } = req.query
-  res.json(db.listarCartoes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+  res.json(db.enriquecerCartoes(db.listarCartoes(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null)))
 })
 
 router.post('/cartoes', (req, res) => {

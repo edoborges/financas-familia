@@ -769,18 +769,19 @@ function renderCartoesScroll(cartoes) {
     return
   }
   el.innerHTML = cartoes.map(c => {
-    const pct = c.limite > 0 ? Math.min((c.gasto_atual/c.limite)*100,100) : 0
-    const disp = c.limite - c.gasto_atual
-    const cJson = encodeURIComponent(JSON.stringify(c))
+    const usado = c.limite_usado ?? c.gasto_atual
+    const pct = c.limite > 0 ? Math.min((usado/c.limite)*100,100) : 0
+    const disp = c.limite > 0 ? c.limite - usado : null
+    const venc = c.proxima_fatura ? ddmmStr(c.proxima_fatura.data) : null
     return `
       <div class="cartao-visual" style="background:linear-gradient(135deg,${c.cor1||'#1a1a2e'},${c.cor2||'#16213e'})"
-           onclick="abrirFaturaCartao(JSON.parse(decodeURIComponent('${cJson}')))">
-        <div class="cv-nome">💳 ${c.nome} <span style="font-size:.7rem;opacity:.7">✏️ editar fatura</span></div>
+           onclick="${venc ? `abrirLink('/?aba=agenda&dia=${c.proxima_fatura.data}')` : `mostrarAba('cartoes');navBtn('nav-cartoes')`}">
+        <div class="cv-nome">💳 ${c.nome} <span style="font-size:.7rem;opacity:.8">${venc ? 'vence ' + venc : 'sem fatura em aberto'}</span></div>
         <div class="cv-bottom">
-          <div class="cv-limite">Limite ${fmt(c.limite)}</div>
+          <div class="cv-limite">${c.limite > 0 ? 'Limite ' + fmt(c.limite) : 'Limite não informado'}</div>
           <div class="cv-valores">
             <div class="cv-gasto">${fmt(c.gasto_atual)}</div>
-            <div class="cv-disp">Disponível<br><strong>${fmt(disp)}</strong></div>
+            <div class="cv-disp">Disponível<br><strong>${disp != null ? fmt(disp) : '—'}</strong></div>
           </div>
           <div class="cv-barra"><div class="cv-barra-fill" style="width:${pct}%"></div></div>
         </div>
@@ -1028,35 +1029,38 @@ async function carregarCartoes() {
     el.innerHTML = `<div class="vazio">💳 Nenhum cartão cadastrado ainda.</div>`
   } else {
     el.innerHTML = cartoes.map(c => {
-      const pct = c.limite > 0 ? Math.min((c.gasto_atual/c.limite)*100,100) : 0
-      const disp = c.limite - c.gasto_atual
+      const usado = c.limite_usado ?? c.gasto_atual
+      const pct = c.limite > 0 ? Math.min((usado/c.limite)*100,100) : 0
+      const disp = c.limite > 0 ? c.limite - usado : null
       const alerta = pct > 80 ? '⚠️ ' : ''
-      const cfJson = encodeURIComponent(JSON.stringify(c))
+      const venc = c.proxima_fatura ? ddmmStr(c.proxima_fatura.data) : null
+      const futuras = (c.faturas_futuras || []).slice(1, 4).map(f => `${ddmmStr(f.data)} ${fmt(f.valor)}`).join(' · ')
       return `
         <div class="cartao-full" style="background:linear-gradient(135deg,${c.cor1||'#1a1a2e'},${c.cor2||'#16213e'});cursor:pointer"
-             onclick="abrirFaturaCartao(JSON.parse(decodeURIComponent('${cfJson}')))">
+             onclick="${venc ? `abrirLink('/?aba=agenda&dia=${c.proxima_fatura.data}')` : ''}">
           <div class="cf-top">
             <div>
               <div class="cf-nome">${alerta}💳 ${c.nome}</div>
-              <div class="cf-usuario">👤 ${c.usuario_nome} · Toque para editar fatura</div>
+              <div class="cf-usuario">👤 ${c.usuario_nome} · fecha dia ${c.dia_fechamento}, vence dia ${c.dia_vencimento}${c.limite_usado_fonte === 'banco' ? ' · 🔌 do banco' : ''}</div>
             </div>
             <div class="cf-bandeira">${c.bandeira||'Visa'}</div>
           </div>
           <div class="cf-barra"><div class="cf-barra-fill" style="width:${pct}%"></div></div>
           <div class="cf-bottom">
             <div>
-              <div class="cf-label">Gasto este mês</div>
+              <div class="cf-label">${venc ? 'Fatura de ' + venc : 'Próxima fatura'}</div>
               <div class="cf-valor">${fmt(c.gasto_atual)}</div>
             </div>
             <div class="cf-disp">
               <div class="cf-label">Disponível</div>
-              <div class="cf-valor">${fmt(disp)}</div>
+              <div class="cf-valor">${disp != null ? fmt(disp) : '—'}</div>
             </div>
             <div>
               <div class="cf-label">Limite total</div>
-              <div class="cf-valor">${fmt(c.limite)}</div>
+              <div class="cf-valor">${c.limite > 0 ? fmt(c.limite) : '—'}</div>
             </div>
           </div>
+          ${futuras ? `<div class="cf-futuras">Próximas: ${futuras}</div>` : ''}
         </div>
       `
     }).join('')

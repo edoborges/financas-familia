@@ -1785,6 +1785,39 @@ const ofDB = {
   usuariosDaFamilia: (familiaId) => db.prepare('SELECT id, nome FROM usuarios WHERE familia_id = ?').all(familiaId)
 }
 
+// Cartão com os números calculados a partir dos lançamentos (o antigo gasto_atual só subia
+// quando a compra era feita pelo formulário): próxima fatura a vencer e limite usado (todas
+// as faturas futuras, com parcelas). Cartão ligado ao Open Finance usa o limite usado do banco.
+function enriquecerCartoes(cartoes) {
+  const hoje = hojeBR()
+  const [hy, hm] = hoje.split('-').map(Number)
+  const mapa = new Map(db.prepare('SELECT * FROM cartoes').all().map(c => [c.id, c]))
+  return cartoes.map(c => {
+    const faturas = []
+    for (let k = 0; k <= 24; k++) {
+      const [y, m] = _somaMes(hy, hm, k)
+      for (const f of _faturasDoMes(null, c.usuario_id, y, m, mapa)) {
+        if (f.chave.startsWith(`fatura:${c.id}:`) && f.data >= hoje) faturas.push({ data: f.data, valor: f.valor })
+      }
+    }
+    faturas.sort((a, b) => a.data.localeCompare(b.data))
+    const pagos = chavesPagas()
+    const naoPaga = f => !pagos.has(`fatura:${c.id}:${f.data}`)
+    const proxima = faturas.find(naoPaga) || null
+    const doBanco = db.prepare('SELECT SUM(saldo) s, COUNT(*) n FROM of_contas WHERE cartao_id = ? AND COALESCE(ignorar, 0) = 0').get(c.id)
+    const usadoApp = faturas.filter(naoPaga).reduce((a, f) => a + f.valor, 0)
+    const limiteUsado = doBanco.n ? Number(doBanco.s || 0) : usadoApp
+    return {
+      ...c,
+      gasto_atual: proxima ? proxima.valor : 0,
+      proxima_fatura: proxima,
+      faturas_futuras: faturas.slice(0, 6),
+      limite_usado: +limiteUsado.toFixed(2),
+      limite_usado_fonte: doBanco.n ? 'banco' : 'app'
+    }
+  })
+}
+
 // Cópia consistente do banco inteiro num arquivo temporário (funciona com o app rodando).
 function gerarBackup() {
   const arq = path.join(require('os').tmpdir(), `financeiro-backup-${Date.now()}.db`)
@@ -1828,7 +1861,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
-  investDB, ofDB,
+  enriquecerCartoes, investDB, ofDB,
   registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
