@@ -370,6 +370,22 @@ router.put('/of/contas/:accountId', (req, res) => {
   }
   res.json(db.ofDB.vincularConta(oc.account_id, { contaId: contaId === undefined ? undefined : parseInt(contaId) || null, cartaoId: cartaoId === undefined ? undefined : parseInt(cartaoId) || null, ignorar, importarDesde }))
 })
+// Prévia dos movimentos de uma conta do banco, sem importar nada (para conferir antes de ligar).
+router.get('/of/contas/:accountId/previa', async (req, res) => {
+  const oc = db.ofDB.conta(req.params.accountId)
+  if (!oc) return res.status(404).json({ erro: 'Conta não encontrada' })
+  if (!daFamilia(req, oc.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  const desde = /^\d{4}-\d{2}-\d{2}$/.test(req.query.desde || '') ? req.query.desde : db.somaDias(db.hojeBR(), -15)
+  try {
+    const r = await of.pluggy(`/v2/transactions?accountId=${encodeURIComponent(oc.account_id)}&dateFrom=${desde}`)
+    res.json({ next: !!r.next, total: (r.results || []).length, movimentos: (r.results || []).map(t => ({
+      data: t.date, descricao: t.description, valor: t.amount, tipo: t.type, status: t.status, categoria: t.category,
+      operacao: t.operationType, metodo: t.paymentData?.paymentMethod,
+      parcela: t.creditCardMetadata ? [t.creditCardMetadata.installmentNumber, t.creditCardMetadata.totalInstallments, t.creditCardMetadata.purchaseDate] : null
+    })) })
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+
 router.post('/of/sincronizar', async (req, res) => {
   try { res.json(await of.sincronizarUsuarios(pessoasDoPedido(req))) }
   catch (e) { res.status(500).json({ erro: e.message }) }
