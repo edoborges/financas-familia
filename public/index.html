@@ -617,6 +617,26 @@
     </div>
 
     <div class="ferr-secao">
+      <div class="ferr-titulo">👤 Conta</div>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirPerfil()">
+        <span class="ferr-icon">🔑</span>
+        <div>
+          <div class="ferr-nome">Editar perfil e trocar PIN</div>
+          <div class="ferr-sub">Nome, telefone e PIN de acesso</div>
+        </div>
+        <span>→</span>
+      </button>
+      <button class="ferr-btn" onclick="sair()">
+        <span class="ferr-icon">↩</span>
+        <div>
+          <div class="ferr-nome">Sair / trocar de usuário</div>
+          <div class="ferr-sub">Volta para a tela de escolher quem entra</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
+    <div class="ferr-secao">
       <div class="ferr-titulo">📤 Exportar dados do mês atual</div>
       <button class="ferr-btn" onclick="exportarCSV();fecharModal('modal-ferramentas')">
         <span class="ferr-icon">📄</span>

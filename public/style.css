@@ -1031,3 +1031,13 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .push-convite-txt b{font-size:.9rem;color:#312e81}
 .push-convite-txt span{font-size:.76rem;color:#4338ca}
 .push-convite-btn{background:#4f46e5;color:#fff;font-weight:700;font-size:.8rem;padding:8px 14px;border-radius:10px;flex-shrink:0}
+
+/* Cabeçalho no celular: os 5 botões cabem na tela (o ↩ Sair ficava cortado) */
+@media (max-width:480px){
+  .app-header{padding-left:12px;padding-right:12px;gap:8px}
+  .header-left{min-width:0;flex:1 1 auto}
+  .header-left > div{min-width:0}
+  .h-nome{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .header-right{gap:5px;flex-shrink:0}
+  .header-right button{padding:6px 7px !important;min-width:0 !important;width:auto !important}
+}
