@@ -1235,6 +1235,65 @@ function recebiveisAtrasados(usuarioId) {
   return db.prepare('SELECT * FROM recebiveis WHERE usuario_id = ? AND recebido_em IS NULL AND data_prevista < ? ORDER BY data_prevista').all(usuarioId, hojeBR())
 }
 
+// ===== OPORTUNIDADES DE NEGÓCIO =====
+// Ideias que a pessoa está estudando (físico, digital, e-commerce…), com os números dela.
+// O app só calcula e compara; a decisão é de quem investe.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS oportunidades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    nome TEXT NOT NULL,
+    tipo TEXT DEFAULT 'fisico',
+    modelo TEXT,
+    investimento REAL DEFAULT 0,
+    lucro_mensal REAL DEFAULT 0,
+    meses_ate_lucro INTEGER DEFAULT 0,
+    horas_semana REAL DEFAULT 0,
+    risco INTEGER DEFAULT 3,
+    status TEXT DEFAULT 'ideia',
+    notas TEXT DEFAULT '',
+    checklist TEXT DEFAULT '[]',
+    ativo INTEGER DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATE
+  )
+`)
+const TIPOS_OPORTUNIDADE = ['fisico', 'digital', 'ecommerce', 'servico', 'franquia', 'imovel', 'sociedade']
+const STATUS_OPORTUNIDADE = ['ideia', 'estudando', 'testando', 'andamento', 'descartada']
+function listarOportunidades(familiaId = null, usuarioId = null) {
+  return _porEscopo(
+    `SELECT o.*, u.nome AS usuario_nome FROM oportunidades o JOIN usuarios u ON u.id = o.usuario_id WHERE o.usuario_id = ? AND o.ativo = 1 ORDER BY o.atualizado_em DESC, o.id DESC`,
+    `SELECT o.*, u.nome AS usuario_nome FROM oportunidades o JOIN usuarios u ON u.id = o.usuario_id WHERE u.familia_id = ? AND o.ativo = 1 ORDER BY o.atualizado_em DESC, o.id DESC`,
+    `SELECT o.*, u.nome AS usuario_nome FROM oportunidades o JOIN usuarios u ON u.id = o.usuario_id WHERE o.ativo = 1 ORDER BY o.atualizado_em DESC, o.id DESC`,
+    usuarioId, familiaId)
+}
+function salvarOportunidade(usuarioId, d) {
+  const num = (v, min = 0, max = 1e9) => Math.min(max, Math.max(min, Number(v) || 0))
+  const checklist = Array.isArray(d.checklist) ? d.checklist.map(String).slice(0, 30) : []
+  const vals = [
+    String(d.nome || '').slice(0, 80),
+    TIPOS_OPORTUNIDADE.includes(d.tipo) ? d.tipo : 'fisico',
+    d.modelo ? String(d.modelo).slice(0, 40) : null,
+    num(d.investimento), num(d.lucroMensal, -1e9), Math.round(num(d.mesesAteLucro, 0, 120)),
+    num(d.horasSemana, 0, 100), Math.round(num(d.risco, 1, 5)) || 3,
+    STATUS_OPORTUNIDADE.includes(d.status) ? d.status : 'ideia',
+    String(d.notas || '').slice(0, 2000), JSON.stringify(checklist), hojeBR()
+  ]
+  let id = d.id
+  if (id) {
+    db.prepare(`UPDATE oportunidades SET nome = ?, tipo = ?, modelo = ?, investimento = ?, lucro_mensal = ?, meses_ate_lucro = ?,
+      horas_semana = ?, risco = ?, status = ?, notas = ?, checklist = ?, atualizado_em = ? WHERE id = ?`).run(...vals, id)
+  } else {
+    id = Number(db.prepare(`INSERT INTO oportunidades (nome, tipo, modelo, investimento, lucro_mensal, meses_ate_lucro,
+      horas_semana, risco, status, notas, checklist, atualizado_em, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(...vals, usuarioId).lastInsertRowid)
+  }
+  return db.prepare('SELECT * FROM oportunidades WHERE id = ?').get(id)
+}
+function deletarOportunidade(id) {
+  db.prepare('UPDATE oportunidades SET ativo = 0 WHERE id = ?').run(id)
+}
+
 // ===== PATRIMÔNIO =====
 const TIPOS_PATRIMONIO = ['reserva', 'investimento', 'negocio', 'bem', 'outro']
 function listarPatrimonio(familiaId = null, usuarioId = null) {
@@ -1600,7 +1659,7 @@ function semPin(u) {
 const _DONO = {
   gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
   receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
-  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', transferencias: 'usuario', investimentos: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', transferencias: 'usuario', investimentos: 'usuario', oportunidades: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
 }
 function familiaDoRegistro(tabela, id) {
   const tipo = _DONO[tabela]
@@ -1854,7 +1913,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias', 'of_transacoes', 'investimentos']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias', 'of_transacoes', 'investimentos', 'oportunidades']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1876,6 +1935,7 @@ module.exports = {
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
   listarPatrimonio, salvarPatrimonio, deletarPatrimonio, resumoPatrimonio,
+  listarOportunidades, salvarOportunidade, deletarOportunidade,
   criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,
   criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,

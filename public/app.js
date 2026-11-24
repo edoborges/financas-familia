@@ -935,6 +935,7 @@ async function carregarMetas() {
   renderInvestResumo()
   renderPatrimonio()
   renderRecebiveis()
+  renderOportunidades()
   const [metas, resumo] = await Promise.all([api('/metas' + famQ()), api('/resumo' + famQ())])
 
   // Resumo financeiro do planejamento. Usa a renda real do mês (programadas + lançadas),
@@ -4359,6 +4360,290 @@ async function acompanharAtivo() {
 async function deixarAcompanhar(t) {
   await api('/invest/acompanhar/' + encodeURIComponent(t), { method: 'DELETE' })
   renderIvAcompanhar()
+}
+
+// ══════════════════════════════════════════
+//  OPORTUNIDADES DE NEGÓCIO (mapa de modelos + ideias em estudo)
+//  Faixas de referência gerais, não promessa de resultado. O app calcula e compara;
+//  a decisão é de quem investe.
+// ══════════════════════════════════════════
+const OP_TIPOS = {
+  fisico:    { nome: 'Físico',     ic: 'loja' },
+  digital:   { nome: 'Digital',    ic: 'notebook' },
+  ecommerce: { nome: 'E-commerce', ic: 'carrinho' },
+  servico:   { nome: 'Serviço',    ic: 'pasta' },
+  franquia:  { nome: 'Franquia',   ic: 'repetir' },
+  imovel:    { nome: 'Imóvel',     ic: 'home' },
+  sociedade: { nome: 'Sociedade',  ic: 'pessoas' },
+}
+const OP_STATUS = {
+  ideia: 'Só uma ideia', estudando: 'Estudando', testando: 'Testando pequeno', andamento: 'Em andamento', descartada: 'Descartada'
+}
+const OP_CHECK = [
+  ['clientes', 'Conversei com pelo menos 10 possíveis clientes'],
+  ['concorrentes', 'Mapeei 3 ou mais concorrentes e os preços deles'],
+  ['custos', 'Listei os custos fixos e variáveis de cada mês'],
+  ['teste', 'Fiz um teste pequeno antes de investir tudo'],
+  ['legal', 'Vi a parte legal (CNPJ/MEI, alvará, contrato)'],
+  ['reserva', 'Minha reserva de emergência está separada deste dinheiro'],
+  ['limite', 'Sei quanto posso perder e em que ponto eu paro'],
+]
+// [id, tipo, nome, resumo, investimento mín, máx, margem, dedicação, risco 1-5, combina, atenção]
+const OP_CATALOGO = [
+  ['consultorio', 'servico', 'Ampliar o consultório', 'Sublocar horários e salas ou montar uma clínica com outros psicólogos atendendo pelo seu CNPJ.', 10000, 60000, '20% a 40%', 'Média', 2,
+    'Você já tem CNPJ, clientela e conhece o mercado por dentro.', 'Contrato com os profissionais, ponto, e regras do CFP para clínicas.'],
+  ['curso', 'digital', 'Curso ou grupo online na sua área', 'Grupos terapêuticos online, cursos de saúde emocional, palestras para empresas.', 2000, 20000, '50% a 80%', 'Alta no começo', 3,
+    'Aproveita sua formação; o custo de produzir é baixo.', 'Precisa de audiência e marketing; publicidade de psicólogo segue regras do CFP.'],
+  ['comunidade', 'digital', 'Comunidade por assinatura', 'Conteúdo mensal e encontros ao vivo para assinantes.', 1000, 10000, '50% a 70%', 'Média e contínua', 3,
+    'Receita recorrente e previsível quando engrena.', 'Muita gente cancela nos primeiros meses; exige constância.'],
+  ['micromarket', 'fisico', 'Micro market em condomínio', 'Mercadinho autônomo com geladeiras e pagamento no totem, dentro de prédios.', 15000, 60000, '15% a 30%', 'Baixa a média (reposição)', 3,
+    'Funciona com pouco tempo seu; dá para começar com um ponto.', 'Furtos, acordo com o síndico e giro baixo em prédio pequeno.'],
+  ['lavanderia', 'franquia', 'Lavanderia self-service', 'Máquinas de lavar e secar com atendimento por app; geralmente por franquia.', 150000, 350000, '15% a 25%', 'Baixa (gestão)', 3,
+    'Pouca mão de obra; cliente fiel do bairro.', 'Investimento alto, aluguel do ponto por anos e concorrência no mesmo bairro.'],
+  ['quiosque', 'fisico', 'Café ou quiosque de comida', 'Café, açaí ou lanche em quiosque de shopping, hospital ou faculdade.', 30000, 120000, '8% a 15%', 'Alta', 4,
+    'Retorno rápido quando o ponto tem fluxo.', 'Aluguel e taxas de shopping pesam; depende de funcionário e de você presente.'],
+  ['lavarapido', 'fisico', 'Lava-rápido ou estética automotiva', 'Lavagem, higienização e polimento; dá para começar pequeno.', 30000, 150000, '15% a 25%', 'Média a alta', 3,
+    'Serviço recorrente, com procura o ano todo.', 'Licença ambiental para água, funcionários e ponto com estacionamento.'],
+  ['marketplace', 'ecommerce', 'Revenda em marketplace', 'Comprar de fornecedor e vender no Mercado Livre, Shopee ou Amazon.', 5000, 40000, '5% a 15%', 'Média a alta', 3,
+    'Começa sem loja física e com estoque pequeno.', 'Taxas do marketplace (10% a 20%), frete, devoluções e guerra de preço.'],
+  ['marca', 'ecommerce', 'Marca própria em loja online', 'Um produto de nicho com marca sua, loja própria e redes sociais.', 15000, 80000, '10% a 25%', 'Alta', 4,
+    'Margem melhor que revenda e a marca vira patrimônio.', 'Precisa de anúncios constantes; o primeiro ano costuma dar prejuízo.'],
+  ['pod', 'ecommerce', 'Estampa sob demanda ou dropshipping', 'Você vende e o fornecedor produz e entrega; sem estoque.', 1000, 5000, '5% a 20%', 'Média', 4,
+    'Teste barato para validar se um nicho vende.', 'Depende de anúncio pago; prazo de entrega e qualidade fora do seu controle.'],
+  ['microfranquia', 'franquia', 'Microfranquia de serviço', 'Franquias até cerca de R$ 100 mil: limpeza, cuidado com idosos, reforço escolar…', 10000, 100000, '10% a 25%', 'Alta', 3,
+    'Modelo pronto, marca e treinamento.', 'Royalties de 5% a 10% do faturamento; leia a Circular de Oferta (COF) com calma.'],
+  ['imovel', 'imovel', 'Imóvel para alugar', 'Kitnet ou studio para aluguel mensal ou por temporada.', 150000, 400000, 'Aluguel de 0,4% a 0,7% do valor por mês', 'Baixa', 2,
+    'Renda estável e um bem que pode valorizar.', 'Vacância, manutenção, condomínio e IR sobre aluguel; dinheiro fica preso.'],
+  ['socio', 'sociedade', 'Sócio investidor', 'Entrar com dinheiro no negócio de alguém que você conhece.', 10000, 200000, 'Depende do negócio', 'Baixa', 5,
+    'Aproveita a experiência de quem já toca o negócio.', 'Contrato social, acesso às contas e acordo de saída escritos antes de pagar.'],
+]
+const opCat = id => OP_CATALOGO.find(c => c[0] === id)
+let opLista = [], opAbaAtual = 'mapa', opFiltro = 'todos', opEdicao = null, opForm = {}
+let opCdi = null // % ao ano
+
+async function opCarregarCdi() {
+  if (opCdi != null) return opCdi
+  try { const i = await api('/invest/indicadores'); opCdi = Number(i.cdi) || null } catch (e) { opCdi = null }
+  return opCdi
+}
+// Indicadores de uma ideia a partir dos números dela.
+function opCalc(o) {
+  const inv = Number(o.investimento) || 0, lucro = Number(o.lucro_mensal ?? o.lucroMensal) || 0
+  const meses = Number(o.meses_ate_lucro ?? o.mesesAteLucro) || 0, horas = Number(o.horas_semana ?? o.horasSemana) || 0
+  const r = {}
+  if (inv > 0 && lucro > 0) {
+    r.payback = Math.ceil(meses + inv / lucro)
+    r.anual = lucro * 12 / inv * 100
+  }
+  if (lucro > 0 && horas > 0) r.porHora = lucro / (horas * 4.33)
+  if (opCdi && inv > 0) {
+    r.cdiMes = inv * (Math.pow(1 + opCdi / 100, 1 / 12) - 1)
+    if (r.anual != null) r.vsCdi = r.anual / opCdi
+  }
+  return r
+}
+const opPrazo = m => m >= 24 ? `${(m / 12).toFixed(1).replace('.0', '').replace('.', ',')} anos` : `${m} ${m === 1 ? 'mês' : 'meses'}`
+const opFaixa = (a, b) => `${fmt(a).replace(',00', '')} a ${fmt(b).replace(',00', '')}`
+const opRiscoTxt = n => ['', 'muito baixo', 'baixo', 'médio', 'alto', 'muito alto'][n] || 'médio'
+
+// Resumo na aba Metas
+async function renderOportunidades() {
+  const el = document.getElementById('oportunidades-section')
+  if (!el) return
+  try {
+    const [lista] = await Promise.all([api('/oportunidades' + famQ()), opCarregarCdi()])
+    opLista = lista
+    const ativas = lista.filter(o => o.status !== 'descartada')
+    if (!ativas.length) {
+      el.innerHTML = `<div class="op-convite" onclick="abrirOportunidades('mapa')">
+        <div class="op-convite-ic">${ico('alvo')}</div>
+        <div><b>Mapeie onde o dinheiro pode trabalhar</b>
+        <span>Modelos de negócio físicos, digitais e de e-commerce, com investimento típico, margem e riscos. Monte suas ideias e compare com deixar o dinheiro no CDI.</span></div>
+        <span class="op-convite-seta">${ico('seta')}</span></div>`
+      return
+    }
+    el.innerHTML = ativas.slice(0, 4).map(opCardHTML).join('') +
+      (ativas.length > 4 ? `<button class="op-mais" onclick="abrirOportunidades('ideias')">Ver as ${ativas.length} ideias</button>` : '') +
+      `<button class="btn-add-full" onclick="abrirFormOportunidade()">＋ Nova ideia</button>`
+  } catch (e) {
+    el.innerHTML = `<div class="pt-vazio">Não foi possível carregar as oportunidades: ${escH(e.message)}</div>`
+  }
+}
+function opCardHTML(o) {
+  const c = opCalc(o), t = OP_TIPOS[o.tipo] || OP_TIPOS.fisico
+  let chk = []
+  try { chk = JSON.parse(o.checklist || '[]') } catch (e) {}
+  const pront = Math.round(chk.length / OP_CHECK.length * 100)
+  const vs = c.vsCdi == null ? '' : c.vsCdi >= 1
+    ? `<span class="op-tag op-bom">${c.vsCdi.toFixed(1).replace('.', ',')}× o CDI</span>`
+    : `<span class="op-tag op-ruim">abaixo do CDI</span>`
+  return `<div class="op-card ${o.status === 'descartada' ? 'op-off' : ''}" onclick="abrirFormOportunidade(${o.id})">
+    <div class="op-card-topo">
+      <div class="op-ic">${ico(t.ic)}</div>
+      <div class="op-card-info"><div class="op-card-nome">${escH(o.nome)}</div>
+        <div class="op-card-sub">${t.nome} · ${OP_STATUS[o.status] || 'Ideia'}${visaoAtual === 'consolidado' ? ' · ' + escH(o.usuario_nome) : ''}</div></div>
+      ${vs}
+    </div>
+    <div class="op-nums">
+      <div><small>Investimento</small><b>${o.investimento ? fmt(o.investimento) : '—'}</b></div>
+      <div><small>Retorno ao ano</small><b>${c.anual != null ? c.anual.toFixed(0) + '%' : '—'}</b></div>
+      <div><small>Se paga em</small><b>${c.payback ? opPrazo(c.payback) : '—'}</b></div>
+    </div>
+    <div class="op-pront"><div class="op-pront-barra"><div style="width:${pront}%"></div></div><span>${chk.length} de ${OP_CHECK.length} passos de validação</span></div>
+  </div>`
+}
+
+// Folha com o mapa e as ideias
+async function abrirOportunidades(aba = 'mapa') {
+  document.getElementById('modal-oportunidades').style.display = 'flex'
+  opAba(aba)
+  opRenderCapital()
+}
+function opAba(aba) {
+  opAbaAtual = aba
+  document.querySelectorAll('#op-seg button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba))
+  if (aba === 'mapa') opRenderMapa(); else opRenderIdeias()
+}
+async function opRenderCapital() {
+  const el = document.getElementById('op-capital')
+  try {
+    const [rs] = await Promise.all([api('/recebiveis' + famQ()), opCarregarCdi()])
+    const pend = rs.filter(r => !r.recebido_em && r.destino === 'investimento')
+    const hoje = hojeLocalBR()
+    const em12 = new Date(); em12.setFullYear(em12.getFullYear() + 1)
+    const lim = em12.toLocaleDateString('sv-SE')
+    const total = pend.reduce((a, r) => a + Number(r.valor), 0)
+    const ano = pend.filter(r => r.data_prevista <= lim).reduce((a, r) => a + Number(r.valor), 0)
+    const partes = []
+    if (total > 0) partes.push(`<div><small>A receber para investir</small><b>${fmt(total)}</b><span>${fmt(ano)} nos próximos 12 meses</span></div>`)
+    if (opCdi) partes.push(`<div><small>CDI hoje</small><b>${opCdi.toFixed(2).replace('.', ',')}% ao ano</b><span>a régua: deixar o dinheiro rendendo</span></div>`)
+    el.innerHTML = partes.length ? `<div class="op-capital-grid">${partes.join('')}</div>` : ''
+    void hoje
+  } catch (e) { el.innerHTML = '' }
+}
+function opFiltrar(t) { opFiltro = t; opRenderMapa() }
+function opRenderMapa() {
+  const el = document.getElementById('op-conteudo')
+  const filtros = ['todos', ...Object.keys(OP_TIPOS)].filter(t => t === 'todos' || OP_CATALOGO.some(c => c[1] === t))
+  const itens = OP_CATALOGO.filter(c => opFiltro === 'todos' || c[1] === opFiltro)
+  el.innerHTML = `
+    <div class="op-filtros">${filtros.map(t => `<button class="${opFiltro === t ? 'on' : ''}" onclick="opFiltrar('${t}')">${t === 'todos' ? 'Todos' : OP_TIPOS[t].nome}</button>`).join('')}</div>
+    ${itens.map(c => {
+      const [id, tipo, nome, resumo, min, max, margem, dedic, risco, combina, atencao] = c
+      const t = OP_TIPOS[tipo]
+      const cdiAno = opCdi ? (min + max) / 2 * opCdi / 100 : null
+      return `<div class="op-modelo">
+        <div class="op-card-topo">
+          <div class="op-ic">${ico(t.ic)}</div>
+          <div class="op-card-info"><div class="op-card-nome">${nome}</div><div class="op-card-sub">${t.nome}</div></div>
+        </div>
+        <p class="op-resumo">${resumo}</p>
+        <div class="op-fatos">
+          <div><small>Investimento típico</small><b>${opFaixa(min, max)}</b></div>
+          <div><small>Margem de lucro</small><b>${margem}</b></div>
+          <div><small>Seu tempo</small><b>${dedic}</b></div>
+          <div><small>Risco</small><b class="op-risco-dots">${'●'.repeat(risco)}<i>${'●'.repeat(5 - risco)}</i> ${opRiscoTxt(risco)}</b></div>
+        </div>
+        <div class="op-pros"><b>Combina:</b> ${combina}</div>
+        <div class="op-contras"><b>Atenção:</b> ${atencao}</div>
+        ${cdiAno ? `<div class="op-regua">Régua: no CDI, ${fmt((min + max) / 2).replace(',00', '')} renderiam cerca de ${fmt(cdiAno / 12)} por mês, sem trabalho e antes do IR.</div>` : ''}
+        <button class="op-estudar" onclick="abrirFormOportunidade(null, '${id}')">Estudar esta ideia</button>
+      </div>`
+    }).join('')}
+    <p class="op-aviso">Faixas gerais de mercado para comparar modelos; variam muito por cidade, ponto e gestão. Não é recomendação de investimento: antes de decidir, valide com o Sebrae e, se for usar o dinheiro da venda, converse com um planejador financeiro (CFP).</p>`
+}
+function opRenderIdeias() {
+  const el = document.getElementById('op-conteudo')
+  el.innerHTML = (opLista.length
+    ? opLista.map(opCardHTML).join('')
+    : `<div class="pt-vazio">Nenhuma ideia ainda. Abra o <b onclick="opAba('mapa')">Mapa</b> e toque em "Estudar esta ideia", ou crie a sua.</div>`) +
+    `<button class="btn-add-full" onclick="abrirFormOportunidade()">＋ Nova ideia</button>`
+}
+
+// Formulário de uma ideia
+function abrirFormOportunidade(id = null, modelo = null) {
+  const o = id ? opLista.find(x => x.id === id) : null
+  const m = modelo ? opCat(modelo) : (o?.modelo ? opCat(o.modelo) : null)
+  opEdicao = o ? o.id : null
+  let chk = []
+  try { chk = JSON.parse(o?.checklist || '[]') } catch (e) {}
+  opForm = { tipo: o?.tipo || m?.[1] || 'fisico', risco: o?.risco || m?.[8] || 3, status: o?.status || 'ideia', modelo: o?.modelo || m?.[0] || null, checklist: new Set(chk) }
+  const v = n => n ? String(Number(n).toFixed(2)).replace('.', ',') : ''
+  document.getElementById('opf-titulo').textContent = o ? 'Editar ideia' : (m ? m[2] : 'Nova ideia')
+  document.getElementById('opf-nome').value = o?.nome || m?.[2] || ''
+  document.getElementById('opf-invest').value = v(o?.investimento)
+  document.getElementById('opf-invest').placeholder = m ? `Típico: ${opFaixa(m[4], m[5])}` : '0,00'
+  document.getElementById('opf-lucro').value = v(o?.lucro_mensal)
+  document.getElementById('opf-meses').value = o?.meses_ate_lucro || ''
+  document.getElementById('opf-horas').value = o?.horas_semana || ''
+  document.getElementById('opf-notas').value = o?.notas || ''
+  document.getElementById('opf-excluir').style.display = o ? 'block' : 'none'
+  document.getElementById('opf-tipos').innerHTML = Object.entries(OP_TIPOS).map(([k, t]) =>
+    `<button class="rtipo-btn" data-v="${k}" onclick="opSel('tipo','${k}')">${t.nome}</button>`).join('')
+  document.getElementById('opf-risco').innerHTML = [1, 2, 3, 4, 5].map(n =>
+    `<button data-v="${n}" onclick="opSel('risco',${n})">${n}<small>${opRiscoTxt(n)}</small></button>`).join('')
+  document.getElementById('opf-status').innerHTML = Object.entries(OP_STATUS).map(([k, s]) =>
+    `<button class="rtipo-btn" data-v="${k}" onclick="opSel('status','${k}')">${s}</button>`).join('')
+  document.getElementById('opf-check').innerHTML = OP_CHECK.map(([k, txt]) =>
+    `<label><input type="checkbox" data-k="${k}" ${opForm.checklist.has(k) ? 'checked' : ''} onchange="opMarcar(this)"> <span>${txt}</span></label>`).join('')
+  opMarcarSel()
+  fecharModal('modal-oportunidades')
+  document.getElementById('modal-oportunidade').style.display = 'flex'
+  opCarregarCdi().then(opCalcForm)
+}
+function opSel(campo, v) { opForm[campo] = v; opMarcarSel() }
+function opMarcarSel() {
+  document.querySelectorAll('#opf-tipos button').forEach(b => b.classList.toggle('sel', b.dataset.v === opForm.tipo))
+  document.querySelectorAll('#opf-status button').forEach(b => b.classList.toggle('sel', b.dataset.v === opForm.status))
+  document.querySelectorAll('#opf-risco button').forEach(b => b.classList.toggle('sel', Number(b.dataset.v) === Number(opForm.risco)))
+}
+function opMarcar(cb) { cb.checked ? opForm.checklist.add(cb.dataset.k) : opForm.checklist.delete(cb.dataset.k) }
+function opDadosForm() {
+  return {
+    nome: document.getElementById('opf-nome').value.trim(),
+    tipo: opForm.tipo, modelo: opForm.modelo, risco: opForm.risco, status: opForm.status,
+    investimento: parseBRL(document.getElementById('opf-invest').value),
+    lucroMensal: parseBRL(document.getElementById('opf-lucro').value),
+    mesesAteLucro: parseInt(document.getElementById('opf-meses').value) || 0,
+    horasSemana: parseFloat(String(document.getElementById('opf-horas').value).replace(',', '.')) || 0,
+    notas: document.getElementById('opf-notas').value.trim(),
+    checklist: [...opForm.checklist],
+  }
+}
+function opCalcForm() {
+  const el = document.getElementById('opf-calc')
+  if (!el) return
+  const d = opDadosForm(), c = opCalc(d)
+  const linhas = []
+  if (c.payback) linhas.push(`<div><small>Se paga em</small><b>${opPrazo(c.payback)}</b></div>`)
+  if (c.anual != null) linhas.push(`<div><small>Retorno ao ano</small><b>${c.anual.toFixed(0)}%</b></div>`)
+  if (c.porHora) linhas.push(`<div><small>Por hora sua</small><b>${fmt(c.porHora)}</b></div>`)
+  if (c.cdiMes) linhas.push(`<div><small>No CDI renderia</small><b>${fmt(c.cdiMes)}/mês</b></div>`)
+  let veredito = ''
+  if (c.vsCdi != null) veredito = c.vsCdi >= 1.5
+    ? `<p class="op-ok">Rende ${c.vsCdi.toFixed(1).replace('.', ',')} vezes o CDI. A diferença paga o risco e o seu trabalho?</p>`
+    : c.vsCdi >= 1 ? `<p class="op-meio">Pouco acima do CDI. Com risco e trabalho, a conta fica apertada.</p>`
+    : `<p class="op-alerta">Abaixo do CDI: deixar o dinheiro rendendo daria mais, sem risco de negócio.</p>`
+  el.innerHTML = linhas.length ? `<div class="op-calc-grid">${linhas.join('')}</div>${veredito}` : `<p class="op-dica">Preencha investimento e lucro por mês para ver em quanto tempo se paga e a comparação com o CDI.</p>`
+}
+async function salvarOportunidade() {
+  const d = opDadosForm()
+  if (!d.nome) { toast('Dê um nome para a ideia', 'erro'); return }
+  try {
+    await api(opEdicao ? `/oportunidades/${opEdicao}` : '/oportunidades', {
+      method: opEdicao ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...d, usuarioId: usuario.id })
+    })
+    fecharModal('modal-oportunidade')
+    toast('✅ Ideia salva')
+    await renderOportunidades()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function excluirOportunidade() {
+  if (!opEdicao || !confirm('Excluir esta ideia?')) return
+  await api(`/oportunidades/${opEdicao}`, { method: 'DELETE' })
+  fecharModal('modal-oportunidade')
+  renderOportunidades()
 }
 
 // ── START ──

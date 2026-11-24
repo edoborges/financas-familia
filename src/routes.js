@@ -562,6 +562,25 @@ router.delete('/patrimonio/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// ===== OPORTUNIDADES DE NEGÓCIO =====
+router.get('/oportunidades', (req, res) => {
+  const { familiaId, usuarioId } = req.query
+  res.json(db.listarOportunidades(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+})
+router.post('/oportunidades', (req, res) => {
+  const { usuarioId, nome } = req.body
+  if (!usuarioId || !String(nome || '').trim()) return res.status(400).json({ erro: 'Dê um nome para a ideia' })
+  res.json(db.salvarOportunidade(parseInt(usuarioId), { ...req.body, id: null }))
+})
+router.put('/oportunidades/:id', (req, res) => {
+  if (!String(req.body.nome || '').trim()) return res.status(400).json({ erro: 'Dê um nome para a ideia' })
+  res.json(db.salvarOportunidade(null, { ...req.body, id: parseInt(req.params.id) }))
+})
+router.delete('/oportunidades/:id', (req, res) => {
+  db.deletarOportunidade(parseInt(req.params.id))
+  res.json({ ok: true })
+})
+
 // Pagamento antecipado / estorno que abate uma fatura (cartão + data de vencimento).
 router.post('/creditos-fatura', (req, res) => {
   const { cartaoId, vencimento, valor, data, descricao } = req.body
