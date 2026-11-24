@@ -320,6 +320,37 @@ function atualizarGastoCartao(cartaoId, valor) {
 function atualizarFaturaCartao(id, gastoAtual) {
   return db.prepare('UPDATE cartoes SET gasto_atual = ? WHERE id = ?').run(gastoAtual, id)
 }
+function editarCartao(id, { nome, limite, diaFechamento, diaVencimento }) {
+  const c = db.prepare('SELECT * FROM cartoes WHERE id = ?').get(id)
+  if (!c) return null
+  db.prepare('UPDATE cartoes SET nome = ?, limite = ?, dia_fechamento = ?, dia_vencimento = ? WHERE id = ?').run(
+    nome || c.nome, limite ?? c.limite,
+    parseInt(diaFechamento) || c.dia_fechamento, parseInt(diaVencimento) || c.dia_vencimento, id)
+  return db.prepare('SELECT * FROM cartoes WHERE id = ?').get(id)
+}
+// Lançamento em lote com a data de cada compra (faturas e extratos lidos pelo assistente).
+// Cada parcela futura vem como um item próprio, já com a data do ciclo em que cai, para
+// entrar na fatura certa. Itens iguais (pessoa, descrição, valor e data) são ignorados.
+function registrarGastosLote(itens) {
+  const r = { aplicados: 0, duplicatas: 0 }
+  const existe = db.prepare('SELECT 1 FROM gastos WHERE usuario_id = ? AND descricao = ? AND ROUND(valor, 2) = ROUND(?, 2) AND date(data_gasto) = ?')
+  const ins = db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, data_gasto, parcelas, parcela_atual, origem)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'importado')`)
+  db.exec('BEGIN')
+  try {
+    for (const it of itens) {
+      if (existe.get(it.usuarioId, it.descricao, it.valor, it.data)) { r.duplicatas++; continue }
+      ins.run(it.usuarioId, it.cartaoId || null, it.contaId || null, it.descricao, it.valor, it.categoria || 'Outros',
+        it.formaPagamento || (it.cartaoId ? 'credito' : 'debito'), it.data, it.parcelas || 1, it.parcelaAtual || 1)
+      r.aplicados++
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+  return r
+}
 function deletarCartao(id) {
   return db.prepare('DELETE FROM cartoes WHERE id = ?').run(id)
 }
@@ -1249,7 +1280,7 @@ module.exports = {
   criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,
   criarConta, listarContas, atualizarSaldoConta, atualizarConta, deletarConta,
-  criarCartao, listarCartoes, obterCartaoPorNome, atualizarGastoCartao, atualizarFaturaCartao, deletarCartao,
+  criarCartao, editarCartao, registrarGastosLote, listarCartoes, obterCartaoPorNome, atualizarGastoCartao, atualizarFaturaCartao, deletarCartao,
   criarEmprestimo, listarEmprestimos, atualizarEmprestimo, editarEmprestimo, deletarEmprestimo, totalDividas,
   registrarGasto, deletarGasto, limparGastosImportados, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,

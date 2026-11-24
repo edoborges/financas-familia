@@ -311,6 +311,47 @@ router.post('/cartoes', (req, res) => {
   }
 })
 
+// Editar cartão (nome, limite, dia de fechamento e de vencimento).
+router.put('/cartoes/:id', (req, res) => {
+  const c = db.editarCartao(parseInt(req.params.id), req.body || {})
+  if (!c) return res.status(404).json({ erro: 'Cartão não encontrado' })
+  res.json(c)
+})
+
+// Lançamento em lote com data (ver db.registrarGastosLote). Os itens ficam dentro de uma
+// lista, fora do alcance da checagem geral do auth.js, então a família é conferida aqui.
+router.post('/gastos/lote', (req, res) => {
+  try {
+    const itens = Array.isArray(req.body.itens) ? req.body.itens : []
+    if (!itens.length || itens.length > 500) return res.status(400).json({ erro: 'Envie de 1 a 500 itens' })
+    const fam = Number(req.usuario.familia_id)
+    const admin = req.usuario.role === 'super_admin'
+    const limpos = []
+    for (const [i, it] of itens.entries()) {
+      const usuarioId = parseInt(it.usuarioId)
+      const valor = Math.round(Number(it.valor) * 100) / 100
+      if (!usuarioId || !it.descricao || !(valor > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(String(it.data || ''))) {
+        return res.status(400).json({ erro: `Item ${i + 1} incompleto ou com data inválida` })
+      }
+      if (!admin) {
+        if (db.familiaDoRegistro('usuarios', usuarioId) !== fam) return res.status(403).json({ erro: `Item ${i + 1}: pessoa de outra família` })
+        for (const [campo, tabela] of [['cartaoId', 'cartoes'], ['contaId', 'contas']]) {
+          if (it[campo] && db.familiaDoRegistro(tabela, parseInt(it[campo])) !== fam) return res.status(403).json({ erro: `Item ${i + 1}: ${campo} de outra família` })
+        }
+      }
+      limpos.push({ ...it, usuarioId, valor, descricao: String(it.descricao).slice(0, 200),
+        cartaoId: it.cartaoId ? parseInt(it.cartaoId) : null, contaId: it.contaId ? parseInt(it.contaId) : null,
+        parcelas: parseInt(it.parcelas) || 1, parcelaAtual: parseInt(it.parcelaAtual) || 1 })
+    }
+    const r = db.registrarGastosLote(limpos)
+    db.registrarImportacao(req.usuario.id, 'lote', String(req.body.origem || 'Lote').slice(0, 60), r.aplicados, r.duplicatas)
+    res.json(r)
+  } catch (e) {
+    console.error('POST /gastos/lote erro:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.put('/cartoes/:id/fatura', (req, res) => {
   const { gastoAtual } = req.body
   db.atualizarFaturaCartao(req.params.id, gastoAtual)
