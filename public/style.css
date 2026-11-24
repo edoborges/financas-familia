@@ -1144,3 +1144,35 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .rv-btn{border:1px solid #e2e8f0;background:var(--card);border-radius:9px;padding:7px 9px;font-size:.74rem;font-weight:700;cursor:pointer}
 .rv-ign{color:#64748b}
 .rv-lembrar{display:flex;gap:6px;align-items:center;font-size:.72rem;color:#64748b;margin-top:7px}
+
+/* ═══ Investimentos ═══ */
+.iv-resumo{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--shadow);margin-bottom:16px;cursor:pointer}
+.iv-resumo div{display:flex;flex-direction:column;align-items:center;gap:2px}
+.iv-resumo span{font-size:.64rem;color:#64748b;font-weight:700;text-transform:uppercase}
+.iv-resumo b{font-size:.86rem}
+.iv-up{color:#059669 !important}
+.iv-down{color:#e11d48 !important}
+.iv-sheet{max-height:92vh;overflow-y:auto}
+.iv-abas{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin-bottom:12px}
+.iv-abas button{border:none;background:none;border-radius:9px;padding:8px 2px;font-size:.7rem;font-weight:700;color:#475569;cursor:pointer}
+.iv-abas button.on{background:var(--card);color:#4338ca;box-shadow:var(--shadow)}
+.iv-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
+.iv-card{background:#f8fafc;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:3px}
+.iv-card span{font-size:.7rem;color:#64748b;font-weight:700}
+.iv-card b{font-size:1.05rem}
+.iv-card small{font-size:.68rem;color:#64748b;line-height:1.3}
+.iv-aviso{font-size:.68rem;color:#94a3b8;margin-top:10px;line-height:1.4}
+.sim-total{font-size:.84rem;margin:12px 0 8px}
+.sim-linha{margin-bottom:10px}
+.sim-topo{display:flex;justify-content:space-between;font-size:.86rem}
+.sim-barra{height:8px;background:#e2e8f0;border-radius:6px;margin:4px 0;overflow:hidden}
+.sim-barra div{height:100%;background:linear-gradient(90deg,#4f46e5,#818cf8);border-radius:6px}
+.iv-tot{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.iv-tot div{background:#f8fafc;border-radius:10px;padding:8px;display:flex;flex-direction:column}
+.iv-tot span{font-size:.66rem;color:#64748b;font-weight:700}
+.iv-tot b{font-size:.84rem}
+.iv-form{border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-top:10px}
+.iv-add{display:flex;gap:6px;margin-bottom:10px}
+.iv-add input{flex:1}
+.iv-add .btn-confirm{flex:0 0 52px}
+#sim-meses{width:100%}

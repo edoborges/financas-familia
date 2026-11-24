@@ -6,6 +6,7 @@ const { processarMensagem } = require('./processador')
 const { gerarPlanoEconomia, analisarArquivoFinanceiro } = require('./ai')
 const auth = require('./auth')
 const of = require('./openfinance')
+const inv = require('./investimentos')
 
 // Tudo daqui para baixo exige login (exceto as rotas públicas listadas em auth.js).
 router.use(auth.exigirLogin)
@@ -320,7 +321,6 @@ router.get('/livre-para-gastar', (req, res) => {
   } catch (e) { res.status(500).json({ erro: e.message }) }
 })
 
-// ===== OPEN FINANCE (Pluggy) =====
 // Pessoas cujos dados o pedido pode ver: a própria (visão "Só eu") ou a família.
 function pessoasDoPedido(req) {
   const fam = req.usuario.role === 'super_admin' && req.query.familiaId ? parseInt(req.query.familiaId) : req.usuario.familia_id
@@ -330,6 +330,70 @@ function pessoasDoPedido(req) {
 }
 const daFamilia = (req, usuarioId) => req.usuario.role === 'super_admin' || db.familiaDoRegistro('usuarios', Number(usuarioId)) === Number(req.usuario.familia_id)
 
+// ===== INVESTIMENTOS =====
+router.get('/invest/indicadores', async (req, res) => {
+  try { res.json(await inv.indicadores()) } catch (e) { res.status(502).json({ erro: e.message }) }
+})
+router.get('/invest/cotacao/:ticker', async (req, res) => {
+  try { res.json(await inv.cotacao(req.params.ticker)) } catch (e) { res.status(404).json({ erro: e.message }) }
+})
+// Carteira com valor atualizado (cotação / CDI acumulado); guarda o último valor para o patrimônio.
+router.get('/invest/carteira', async (req, res) => {
+  const pessoas = pessoasDoPedido(req)
+  const lista = db.investDB.listar(pessoas)
+  const itens = await Promise.all(lista.map(async i => {
+    try {
+      const v = await inv.valorAtual(i)
+      db.investDB.guardarValor(i.id, v.valor)
+      return { ...i, valor_atual: v.valor, preco_atual: v.preco ?? null, variacao_dia: v.variacaoDia ?? null, nome_ativo: v.nome || i.nome, erro_cotacao: null }
+    } catch (e) {
+      return { ...i, erro_cotacao: e.message }
+    }
+  }))
+  const aplicado = itens.reduce((a, i) => a + Number(i.valor_aplicado || 0), 0)
+  const atual = itens.reduce((a, i) => a + Number(i.valor_atual ?? i.valor_aplicado ?? 0), 0)
+  const porTipo = {}
+  for (const i of itens) porTipo[i.tipo] = (porTipo[i.tipo] || 0) + Number(i.valor_atual ?? i.valor_aplicado ?? 0)
+  res.json({ itens, aplicado, atual, resultado: atual - aplicado, porTipo })
+})
+router.post('/invest/carteira', (req, res) => {
+  const { usuarioId } = req.body
+  if (!usuarioId || !req.body.tipo) return res.status(400).json({ erro: 'Informe o tipo' })
+  res.json(db.investDB.salvar(parseInt(usuarioId), req.body))
+})
+router.put('/invest/carteira/:id', (req, res) => {
+  const i = db.investDB.obter(parseInt(req.params.id))
+  if (!i) return res.status(404).json({ erro: 'Não encontrado' })
+  if (!daFamilia(req, i.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  res.json(db.investDB.salvar(i.usuario_id, req.body, i.id))
+})
+router.delete('/invest/carteira/:id', (req, res) => {
+  const i = db.investDB.obter(parseInt(req.params.id))
+  if (!i) return res.status(404).json({ erro: 'Não encontrado' })
+  if (!daFamilia(req, i.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  db.investDB.remover(i.id)
+  res.json({ ok: true })
+})
+// Lista de acompanhamento: ativos que a própria pessoa escolheu observar.
+router.get('/invest/acompanhar', async (req, res) => {
+  const tickers = db.investDB.acompanhando(req.usuario.id)
+  res.json(await Promise.all(tickers.map(async t => {
+    try { return await inv.cotacao(t) } catch (e) { return { ticker: t, erro: e.message } }
+  })))
+})
+router.post('/invest/acompanhar', async (req, res) => {
+  const ticker = String(req.body.ticker || '').trim().toUpperCase()
+  if (!/^[A-Z0-9^.-]{2,15}$/.test(ticker)) return res.status(400).json({ erro: 'Código inválido' })
+  try { await inv.cotacao(ticker) } catch (e) { return res.status(404).json({ erro: `Não achei ${ticker}. Confira o código (ex.: PETR4, ITUB4, BOVA11, MXRF11, BTC).` }) }
+  db.investDB.acompanhar(req.usuario.id, ticker)
+  res.json({ ok: true })
+})
+router.delete('/invest/acompanhar/:ticker', (req, res) => {
+  db.investDB.desacompanhar(req.usuario.id, req.params.ticker)
+  res.json({ ok: true })
+})
+
+// ===== OPEN FINANCE (Pluggy) =====
 router.get('/of/status', (req, res) => {
   const pessoas = pessoasDoPedido(req)
   res.json({ configurado: of.configurado(), itens: db.ofDB.itens(pessoas), contas: db.ofDB.contas(pessoas), revisar: db.ofDB.contarRevisar(pessoas) })

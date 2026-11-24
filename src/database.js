@@ -315,6 +315,31 @@ db.exec(`
     PRIMARY KEY (usuario_id, chave)
   );
 
+  -- Carteira de investimentos (posições) e lista de acompanhamento.
+  CREATE TABLE IF NOT EXISTS investimentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    tipo TEXT NOT NULL,
+    ticker TEXT,
+    nome TEXT,
+    quantidade REAL DEFAULT 0,
+    preco_medio REAL DEFAULT 0,
+    valor_aplicado REAL DEFAULT 0,
+    data_aplicacao DATE,
+    percentual_cdi REAL,
+    instituicao TEXT DEFAULT '',
+    valor_atual REAL,
+    atualizado_em DATETIME,
+    ativo INTEGER DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS acompanhamento (
+    usuario_id INTEGER NOT NULL,
+    ticker TEXT NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (usuario_id, ticker)
+  );
+
   -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
   -- por ninguém.
   CREATE TABLE IF NOT EXISTS sessoes (
@@ -1243,7 +1268,8 @@ function _numerosPatrimonio(usuarioIds) {
   const em = `(${usuarioIds.map(() => '?').join(',')})`
   const um = sql => Number(db.prepare(sql).get(...usuarioIds).v || 0)
   return {
-    itens: um(`SELECT COALESCE(SUM(valor), 0) v FROM patrimonio WHERE ativo = 1 AND usuario_id IN ${em}`),
+    itens: um(`SELECT COALESCE(SUM(valor), 0) v FROM patrimonio WHERE ativo = 1 AND usuario_id IN ${em}`)
+      + um(`SELECT COALESCE(SUM(COALESCE(valor_atual, valor_aplicado)), 0) v FROM investimentos WHERE ativo = 1 AND usuario_id IN ${em}`),
     contas: um(`SELECT COALESCE(SUM(saldo), 0) v FROM contas WHERE usuario_id IN ${em}`),
     dividas: um(`SELECT COALESCE(SUM(valor_total - valor_pago), 0) v FROM emprestimos WHERE status = 'ativo' AND usuario_id IN ${em}`),
     aReceber: um(`SELECT COALESCE(SUM(valor), 0) v FROM recebiveis WHERE recebido_em IS NULL AND usuario_id IN ${em}`)
@@ -1262,6 +1288,8 @@ function resumoPatrimonio(familiaId = null, usuarioId = null) {
   const n = _numerosPatrimonio(ids)
   const porTipo = {}
   for (const p of listarPatrimonio(familiaId, usuarioId)) porTipo[p.tipo] = (porTipo[p.tipo] || 0) + Number(p.valor)
+  const carteira = investDB.listar(ids).reduce((a, i) => a + Number(i.valor_atual ?? i.valor_aplicado ?? 0), 0)
+  if (carteira) porTipo.investimento = (porTipo.investimento || 0) + carteira
   const em = `(${ids.map(() => '?').join(',') || 'NULL'})`
   const historico = ids.length ? db.prepare(`SELECT mes, SUM(ativos) ativos, SUM(dividas) dividas, SUM(a_receber) a_receber
     FROM patrimonio_historico WHERE usuario_id IN ${em} GROUP BY mes ORDER BY mes DESC LIMIT 12`).all(...ids).reverse() : []
@@ -1570,7 +1598,7 @@ function semPin(u) {
 const _DONO = {
   gastos: 'usuario', cartoes: 'usuario', contas: 'usuario', emprestimos: 'usuario',
   receitas: 'usuario', receitas_programadas: 'usuario', orcamentos: 'usuario',
-  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', transferencias: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
+  gastos_recorrentes: 'usuario', recebiveis: 'usuario', patrimonio: 'usuario', fatura_creditos: 'usuario', transferencias: 'usuario', investimentos: 'usuario', metas: 'familia', usuarios: 'proprio', familias: 'id'
 }
 function familiaDoRegistro(tabela, id) {
   const tipo = _DONO[tabela]
@@ -1637,6 +1665,36 @@ function livreParaGastar(familiaId = null, usuarioId = null) {
     estouro: estouro ? { data: estouro.data, saldo: +estouro.saldo.toFixed(2) } : null,
     horizonte: serie[serie.length - 1].data
   }
+}
+
+// ===== INVESTIMENTOS =====
+const TIPOS_INVEST = ['acao', 'fii', 'etf', 'bdr', 'cripto', 'tesouro', 'cdb', 'outro']
+const investDB = {
+  listar: (usuarioIds) => usuarioIds.length
+    ? db.prepare(`SELECT i.*, u.nome AS usuario_nome FROM investimentos i JOIN usuarios u ON u.id = i.usuario_id WHERE i.ativo = 1 AND i.usuario_id IN (${usuarioIds.map(() => '?').join(',')}) ORDER BY i.tipo, i.ticker, i.nome`).all(...usuarioIds)
+    : [],
+  obter: (id) => db.prepare('SELECT * FROM investimentos WHERE id = ?').get(id),
+  salvar: (usuarioId, f, id = null) => {
+    const tipo = TIPOS_INVEST.includes(f.tipo) ? f.tipo : 'outro'
+    const quantidade = Number(f.quantidade) || 0
+    const preco = Number(f.precoMedio) || 0
+    const aplicado = Number(f.valorAplicado) || (quantidade * preco) || 0
+    const campos = [tipo, f.ticker ? String(f.ticker).trim().toUpperCase().slice(0, 15) : null, f.nome ? String(f.nome).slice(0, 80) : null,
+      quantidade, preco, aplicado, /^\d{4}-\d{2}-\d{2}$/.test(f.dataAplicacao || '') ? f.dataAplicacao : hojeBR(),
+      Number(f.percentualCdi) > 0 ? Number(f.percentualCdi) : null, f.instituicao ? String(f.instituicao).slice(0, 60) : '',
+      Number(f.valorAtual) > 0 ? Number(f.valorAtual) : null]
+    if (id) {
+      db.prepare('UPDATE investimentos SET tipo=?, ticker=?, nome=?, quantidade=?, preco_medio=?, valor_aplicado=?, data_aplicacao=?, percentual_cdi=?, instituicao=?, valor_atual=COALESCE(?, valor_atual) WHERE id=?').run(...campos, id)
+      return investDB.obter(id)
+    }
+    const novo = Number(db.prepare('INSERT INTO investimentos (tipo, ticker, nome, quantidade, preco_medio, valor_aplicado, data_aplicacao, percentual_cdi, instituicao, valor_atual, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(...campos, usuarioId).lastInsertRowid)
+    return investDB.obter(novo)
+  },
+  guardarValor: (id, valor) => db.prepare('UPDATE investimentos SET valor_atual = ?, atualizado_em = CURRENT_TIMESTAMP WHERE id = ?').run(valor, id),
+  remover: (id) => db.prepare('UPDATE investimentos SET ativo = 0 WHERE id = ?').run(id),
+  acompanhando: (usuarioId) => db.prepare('SELECT ticker FROM acompanhamento WHERE usuario_id = ? ORDER BY criado_em').all(usuarioId).map(r => r.ticker),
+  acompanhar: (usuarioId, ticker) => db.prepare('INSERT OR IGNORE INTO acompanhamento (usuario_id, ticker) VALUES (?, ?)').run(usuarioId, String(ticker).trim().toUpperCase().slice(0, 15)),
+  desacompanhar: (usuarioId, ticker) => db.prepare('DELETE FROM acompanhamento WHERE usuario_id = ? AND ticker = ?').run(usuarioId, String(ticker).trim().toUpperCase())
 }
 
 // ===== OPEN FINANCE (dados; a conversa com a Pluggy fica em openfinance.js) =====
@@ -1753,7 +1811,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias', 'of_transacoes']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias', 'of_transacoes', 'investimentos']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1770,7 +1828,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
-  ofDB,
+  investDB, ofDB,
   registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,

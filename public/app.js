@@ -915,6 +915,7 @@ function appendChat(el) {
 
 // ── METAS ──
 async function carregarMetas() {
+  renderInvestResumo()
   renderPatrimonio()
   renderRecebiveis()
   const [metas, resumo] = await Promise.all([api('/metas' + famQ()), api('/resumo' + famQ())])
@@ -4023,6 +4024,263 @@ async function decidirOF(txId, acao, tipoReceita) {
     if (!document.querySelector('#rv-lista .rv-item')) document.getElementById('rv-lista').innerHTML = '<div class="pt-vazio">Tudo revisado 🎉</div>'
     renderBannerRevisar(); renderLivre(); renderContasPagar()
   } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ══════════════════════════════════════════
+//  INVESTIMENTOS (dados e contas; nada de recomendação)
+// ══════════════════════════════════════════
+const pct = (v, casas = 2) => v == null || isNaN(v) ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(casas).replace('.', ',')}%`
+const TIPO_INV = { acao: '📊 Ação', fii: '🏢 FII', etf: '🧺 ETF', bdr: '🌎 BDR', cripto: '🪙 Cripto', tesouro: '🏛️ Tesouro', cdb: '🏦 CDB/LCI/LCA', outro: '📦 Outro' }
+const RV = ['acao', 'fii', 'etf', 'bdr', 'cripto']
+let ivAba = 'simulador'
+let ivIndic = null
+
+async function carregarIndicadores() {
+  if (ivIndic) return ivIndic
+  ivIndic = await api('/invest/indicadores')
+  return ivIndic
+}
+
+async function renderInvestResumo() {
+  const el = document.getElementById('invest-resumo')
+  if (!el) return
+  try {
+    const i = await carregarIndicadores()
+    el.innerHTML = `
+      <div><span>Selic</span><b>${String(i.selic).replace('.', ',')}%</b></div>
+      <div><span>CDI</span><b>${String(i.cdi).replace('.', ',')}%</b></div>
+      <div><span>IPCA 12m</span><b>${String(i.ipca12m).replace('.', ',')}%</b></div>
+      <div><span>Ibovespa</span><b class="${(i.ibov?.variacaoDia || 0) >= 0 ? 'iv-up' : 'iv-down'}">${i.ibov ? pct(i.ibov.variacaoDia) : '—'}</b></div>`
+  } catch (e) { el.innerHTML = '<div class="of-sub">Indicadores indisponíveis agora.</div>' }
+}
+
+function abrirInvest(aba) {
+  document.getElementById('modal-invest').style.display = 'flex'
+  abaInvest(aba || ivAba)
+}
+function abaInvest(aba) {
+  ivAba = aba
+  document.querySelectorAll('.iv-abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba))
+  const el = document.getElementById('iv-conteudo')
+  el.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
+  ;({ indicadores: renderIvIndicadores, simulador: renderIvSimulador, carteira: renderIvCarteira, acompanhar: renderIvAcompanhar })[aba]()
+}
+
+// ── Indicadores ──
+async function renderIvIndicadores() {
+  const el = document.getElementById('iv-conteudo')
+  try {
+    const i = await carregarIndicadores()
+    const real = ((1 + i.cdi / 100) / (1 + i.ipca12m / 100) - 1) * 100
+    el.innerHTML = `
+      <div class="iv-cards">
+        <div class="iv-card"><span>Selic (meta)</span><b>${String(i.selic).replace('.', ',')}% a.a.</b><small>Taxa básica de juros, definida pelo Copom.</small></div>
+        <div class="iv-card"><span>CDI</span><b>${String(i.cdi).replace('.', ',')}% a.a.</b><small>Referência da renda fixa (CDB, Tesouro Selic…). Ref. ${i.cdiRef}.</small></div>
+        <div class="iv-card"><span>Inflação (IPCA 12 meses)</span><b>${String(i.ipca12m).replace('.', ',')}%</b><small>Quanto os preços subiram. Ref. ${i.ipcaRef}.</small></div>
+        <div class="iv-card"><span>Juro real (CDI − inflação)</span><b>${pct(real)}</b><small>Quanto o CDI ganha da inflação, em 12 meses.</small></div>
+        <div class="iv-card"><span>Ibovespa</span><b>${i.ibov ? Math.round(i.ibov.pontos).toLocaleString('pt-BR') + ' pts' : '—'}</b>
+          <small>Hoje ${i.ibov ? pct(i.ibov.variacaoDia) : '—'} · 12 meses ${i.ibov ? pct(i.ibov.variacao12m) : '—'}</small></div>
+      </div>
+      <p class="of-sub">Fontes: Banco Central (SGS) e B3 via Yahoo Finance. Atualiza a cada poucas horas.</p>`
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Não foi possível buscar os indicadores: ${escH(e.message)}</div>` }
+}
+
+// ── Simulador ──
+function mesesAte(dataISO) {
+  const hoje = new Date(hojeLocalBR() + 'T12:00:00'), d = new Date(dataISO + 'T12:00:00')
+  return Math.max(0, (d.getFullYear() - hoje.getFullYear()) * 12 + (d.getMonth() - hoje.getMonth()))
+}
+const taxaMes = anual => Math.pow(1 + anual / 100, 1 / 12) - 1
+const aliquotaIR = dias => dias <= 180 ? 0.225 : dias <= 360 ? 0.20 : dias <= 720 ? 0.175 : 0.15
+
+// Cada aporte rende do mês em que entra até o fim; IR regressivo pelo tempo de cada um.
+function simular(aportes, horizonte, taxaMensal, comIR) {
+  let bruto = 0, liquido = 0, aportado = 0
+  for (const ap of aportes) {
+    if (ap.mes > horizonte) continue
+    const n = horizonte - ap.mes
+    const fim = ap.valor * Math.pow(1 + taxaMensal, n)
+    const ganho = fim - ap.valor
+    aportado += ap.valor
+    bruto += fim
+    liquido += comIR ? fim - ganho * aliquotaIR(n * 30) : fim
+  }
+  return { aportado, bruto, liquido }
+}
+
+let ivVenda = []
+async function renderIvSimulador() {
+  const el = document.getElementById('iv-conteudo')
+  try {
+    const [i, receb] = await Promise.all([carregarIndicadores(), api('/recebiveis' + famQ())])
+    ivVenda = receb.filter(r => !r.recebido_em && r.destino === 'investimento')
+    const ultimo = ivVenda.length ? mesesAte(ivVenda[ivVenda.length - 1].data_prevista) : 0
+    const totalVenda = ivVenda.reduce((s, r) => s + Number(r.valor), 0)
+    el.innerHTML = `
+      <p class="modal-desc">Quanto o dinheiro renderia mantendo as taxas de hoje (Selic ${String(i.selic).replace('.', ',')}%, CDI ${String(i.cdi).replace('.', ',')}%, inflação ${String(i.ipca12m).replace('.', ',')}%).</p>
+      ${ivVenda.length ? `<label class="rf-estimada"><input id="sim-venda" type="checkbox" checked onchange="calcularSimulacao()"><span><b>Usar as parcelas da venda</b> (${fmt(totalVenda)} em ${ivVenda.length} entradas, nas datas previstas)</span></label>` : ''}
+      <label class="input-label">Valor que já tem para começar</label>
+      <div class="input-prefix"><span>R$</span><input id="sim-inicial" type="text" inputmode="decimal" placeholder="0,00" oninput="calcularSimulacao()" /></div>
+      <label class="input-label">Quanto mais por mês (além da venda)</label>
+      <div class="input-prefix"><span>R$</span><input id="sim-mensal" type="text" inputmode="decimal" placeholder="0,00" oninput="calcularSimulacao()" /></div>
+      <label class="input-label">Por quanto tempo (meses)</label>
+      <input id="sim-meses" type="number" min="1" max="600" value="${Math.max(12, ultimo + 12)}" oninput="calcularSimulacao()" />
+      <div id="sim-resultado"></div>`
+    calcularSimulacao()
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Erro: ${escH(e.message)}</div>` }
+}
+
+function calcularSimulacao() {
+  const i = ivIndic
+  const out = document.getElementById('sim-resultado')
+  if (!i || !out) return
+  const horizonte = Math.max(1, parseInt(document.getElementById('sim-meses').value) || 12)
+  const inicial = parseBRL(document.getElementById('sim-inicial').value)
+  const mensal = parseBRL(document.getElementById('sim-mensal').value)
+  const aportes = []
+  if (inicial > 0) aportes.push({ mes: 0, valor: inicial })
+  if (mensal > 0) for (let m = 1; m <= horizonte; m++) aportes.push({ mes: m, valor: mensal })
+  if (document.getElementById('sim-venda')?.checked) for (const r of ivVenda) aportes.push({ mes: mesesAte(String(r.data_prevista).slice(0, 10)), valor: Number(r.valor) })
+  if (!aportes.length) { out.innerHTML = '<div class="pt-vazio">Informe um valor para simular.</div>'; return }
+  // Poupança: 0,5% a.m. (+TR, ignorada) se Selic > 8,5%; senão 70% da Selic. Isenta de IR.
+  const poup = i.selic > 8.5 ? 0.005 : taxaMes(i.selic * 0.7)
+  const linhas = [
+    { nome: '🐷 Poupança', r: simular(aportes, horizonte, poup, false), obs: 'isenta de IR; TR não considerada' },
+    { nome: '🏦 100% do CDI', r: simular(aportes, horizonte, taxaMes(i.cdi), true), obs: 'ex.: CDB de liquidez diária; com IR regressivo' },
+    { nome: '🏛️ Tesouro Selic', r: simular(aportes, horizonte, taxaMes(i.selic - 0.2), true), obs: 'Selic − 0,2% de custódia B3; com IR' }
+  ]
+  const max = Math.max(...linhas.map(l => l.r.liquido))
+  const inflacao = Math.pow(1 + i.ipca12m / 100, horizonte / 12)
+  const aportado = linhas[0].r.aportado
+  out.innerHTML = `
+    <div class="sim-total">Você colocaria <b>${fmt(aportado)}</b> ao longo de ${horizonte} meses.</div>
+    ${linhas.map(l => `
+      <div class="sim-linha">
+        <div class="sim-topo"><b>${l.nome}</b><b>${fmt(l.r.liquido)}</b></div>
+        <div class="sim-barra"><div style="width:${Math.max(3, l.r.liquido / max * 100)}%"></div></div>
+        <div class="of-sub">Rende ${fmt(l.r.liquido - l.r.aportado)} líquido · em dinheiro de hoje ≈ ${fmt(l.r.liquido / inflacao)} · ${l.obs}</div>
+      </div>`).join('')}
+    <p class="of-sub">Simulação com as taxas de hoje mantidas constantes, só para comparar ordens de grandeza. Taxas mudam, cada produto tem regras e riscos próprios, e isto não é recomendação.</p>`
+}
+
+// ── Carteira ──
+async function renderIvCarteira() {
+  const el = document.getElementById('iv-conteudo')
+  try {
+    const c = await api('/invest/carteira' + famQ())
+    el.innerHTML = `
+      ${c.itens.length ? `
+        <div class="iv-tot">
+          <div><span>Aplicado</span><b>${fmt(c.aplicado)}</b></div>
+          <div><span>Hoje</span><b>${fmt(c.atual)}</b></div>
+          <div><span>Resultado</span><b class="${c.resultado >= 0 ? 'iv-up' : 'iv-down'}">${c.resultado >= 0 ? '+' : ''}${fmt(c.resultado)}</b></div>
+        </div>
+        ${c.itens.map(it => {
+          const atual = Number(it.valor_atual ?? it.valor_aplicado ?? 0), apl = Number(it.valor_aplicado || 0)
+          const res = apl ? (atual / apl - 1) * 100 : null
+          return `<div class="pt-item" onclick="editarInvest(${it.id})">
+            <div><div class="pt-item-nome">${TIPO_INV[it.tipo] || ''} ${escH(it.ticker || it.nome || '')}</div>
+              <div class="pt-item-sub">${RV.includes(it.tipo) ? `${Number(it.quantidade).toLocaleString('pt-BR')} × ${it.preco_atual ? fmt(it.preco_atual) : '—'} (médio ${fmt(it.preco_medio)})` : escH(it.instituicao || '') + (it.percentual_cdi ? ` · ${it.percentual_cdi}% do CDI` : '')}${it.erro_cotacao ? ' · ⚠️ ' + escH(it.erro_cotacao) : ''}</div></div>
+            <div style="text-align:right"><b>${fmt(atual)}</b><div class="pt-item-sub ${(res || 0) >= 0 ? 'iv-up' : 'iv-down'}">${pct(res)}</div></div>
+          </div>`
+        }).join('')}`
+      : '<div class="pt-vazio">Sua carteira está vazia. Quando você investir, registre aqui e o app acompanha cotações e resultado — e soma no patrimônio.</div>'}
+      <button class="btn-confirm of-conectar" onclick="editarInvest()">＋ Registrar investimento</button>
+      <div id="iv-form"></div>`
+    window._ivItens = c.itens
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Erro: ${escH(e.message)}</div>` }
+}
+
+function editarInvest(id) {
+  const it = id ? (window._ivItens || []).find(x => x.id === id) : null
+  const f = document.getElementById('iv-form')
+  f.innerHTML = `
+    <div class="iv-form">
+      <label class="input-label">Tipo</label>
+      <select id="ivf-tipo" class="select-input" onchange="ajustarFormInvest()">${Object.entries(TIPO_INV).map(([k, v]) => `<option value="${k}" ${it?.tipo === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <div id="ivf-rv">
+        <input id="ivf-ticker" type="text" placeholder="Código (ex.: PETR4, BOVA11, MXRF11, BTC)" value="${escH(it?.ticker || '')}" style="text-transform:uppercase" />
+        <div class="form-row">
+          <div class="input-prefix small"><span>Qtd</span><input id="ivf-qtd" type="text" inputmode="decimal" value="${it ? String(it.quantidade).replace('.', ',') : ''}" /></div>
+          <div class="input-prefix small"><span>R$</span><input id="ivf-preco" type="text" inputmode="decimal" placeholder="Preço médio" value="${it ? String(it.preco_medio).replace('.', ',') : ''}" /></div>
+        </div>
+      </div>
+      <div id="ivf-rf">
+        <input id="ivf-nome" type="text" placeholder="Nome (ex.: CDB Banco X, Tesouro Selic 2029)" value="${escH(it?.nome || '')}" />
+        <input id="ivf-inst" type="text" placeholder="Onde está (banco/corretora)" value="${escH(it?.instituicao || '')}" />
+        <div class="form-row">
+          <div class="input-prefix small"><span>R$</span><input id="ivf-valor" type="text" inputmode="decimal" placeholder="Valor aplicado" value="${it ? String(it.valor_aplicado).replace('.', ',') : ''}" /></div>
+          <div class="input-prefix small"><span>% CDI</span><input id="ivf-cdi" type="text" inputmode="decimal" placeholder="ex.: 100" value="${it?.percentual_cdi || ''}" /></div>
+        </div>
+      </div>
+      <label class="input-label">Data da aplicação</label>
+      <input id="ivf-data" type="date" value="${it?.data_aplicacao || hojeLocalBR()}" />
+      <div class="modal-btns">
+        ${it ? `<button class="btn-cancel" onclick="removerInvest(${it.id})">🗑 Excluir</button>` : ''}
+        <button class="btn-confirm" onclick="salvarInvest(${it ? it.id : 'null'})">Salvar</button>
+      </div>
+    </div>`
+  ajustarFormInvest()
+  f.scrollIntoView({ behavior: 'smooth' })
+}
+function ajustarFormInvest() {
+  const rv = RV.includes(document.getElementById('ivf-tipo').value)
+  document.getElementById('ivf-rv').style.display = rv ? 'block' : 'none'
+  document.getElementById('ivf-rf').style.display = rv ? 'none' : 'block'
+}
+async function salvarInvest(id) {
+  const tipo = document.getElementById('ivf-tipo').value
+  const rv = RV.includes(tipo)
+  const body = { usuarioId: usuario.id, tipo, dataAplicacao: document.getElementById('ivf-data').value }
+  if (rv) {
+    Object.assign(body, { ticker: document.getElementById('ivf-ticker').value.trim().toUpperCase(), quantidade: parseBRL(document.getElementById('ivf-qtd').value), precoMedio: parseBRL(document.getElementById('ivf-preco').value) })
+    if (!body.ticker || !(body.quantidade > 0)) { toast('Informe código e quantidade', 'erro'); return }
+    try { await api('/invest/cotacao/' + encodeURIComponent(body.ticker)) } catch (e) { toast('❌ Não achei ' + body.ticker + '. Confira o código.', 'erro'); return }
+  } else {
+    Object.assign(body, { nome: document.getElementById('ivf-nome').value.trim(), instituicao: document.getElementById('ivf-inst').value.trim(), valorAplicado: parseBRL(document.getElementById('ivf-valor').value), percentualCdi: parseBRL(document.getElementById('ivf-cdi').value) })
+    if (!body.nome || !(body.valorAplicado > 0)) { toast('Informe nome e valor', 'erro'); return }
+  }
+  try {
+    await api(id ? '/invest/carteira/' + id : '/invest/carteira', { method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    toast('✅ Salvo')
+    renderIvCarteira(); renderPatrimonio()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function removerInvest(id) {
+  if (!confirm('Excluir este investimento da carteira?')) return
+  await api('/invest/carteira/' + id, { method: 'DELETE' })
+  renderIvCarteira(); renderPatrimonio()
+}
+
+// ── Acompanhar ──
+async function renderIvAcompanhar() {
+  const el = document.getElementById('iv-conteudo')
+  try {
+    const lista = await api('/invest/acompanhar')
+    el.innerHTML = `
+      <p class="modal-desc">Ativos que você quer observar. Você escolhe quais — o app só mostra preço e variação.</p>
+      <div class="iv-add"><input id="iv-novo" type="text" placeholder="Código (ex.: PETR4, ITUB4, BOVA11, BTC)" style="text-transform:uppercase" />
+        <button class="btn-confirm" onclick="acompanharAtivo()">＋</button></div>
+      ${lista.length ? lista.map(c => c.erro ? `<div class="pt-item"><div>${escH(c.ticker)} · ⚠️ ${escH(c.erro)}</div><button class="cal-desfazer" onclick="deixarAcompanhar('${escH(c.ticker)}')">✕</button></div>` : `
+        <div class="pt-item">
+          <div><div class="pt-item-nome">${escH(c.ticker)}</div><div class="pt-item-sub">${escH(c.nome)}</div></div>
+          <div style="text-align:right"><b>${c.moeda === 'BRL' ? fmt(c.preco) : c.preco.toLocaleString('pt-BR') + ' ' + c.moeda}</b>
+            <div class="pt-item-sub"><span class="${(c.variacaoDia || 0) >= 0 ? 'iv-up' : 'iv-down'}">hoje ${pct(c.variacaoDia)}</span> · 12m ${pct(c.variacao12m, 1)}</div></div>
+          <button class="cal-desfazer" onclick="deixarAcompanhar('${escH(c.ticker)}')">✕</button>
+        </div>`).join('') : '<div class="pt-vazio">Nenhum ativo na lista.</div>'}`
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Erro: ${escH(e.message)}</div>` }
+}
+async function acompanharAtivo() {
+  const t = document.getElementById('iv-novo').value.trim().toUpperCase()
+  if (!t) return
+  try {
+    await api('/invest/acompanhar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker: t }) })
+    renderIvAcompanhar()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function deixarAcompanhar(t) {
+  await api('/invest/acompanhar/' + encodeURIComponent(t), { method: 'DELETE' })
+  renderIvAcompanhar()
 }
 
 // ── START ──

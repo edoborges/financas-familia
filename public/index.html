@@ -356,6 +356,13 @@
 
       <div class="plan-resumo" id="plan-resumo"></div>
 
+      <!-- Investimentos: indicadores, simulador, carteira e acompanhamento -->
+      <div class="section-title-row">
+        <span>📈 Investimentos</span>
+        <button class="ver-tudo" onclick="abrirInvest('simulador')">Abrir →</button>
+      </div>
+      <div id="invest-resumo" class="iv-resumo" onclick="abrirInvest('indicadores')"></div>
+
       <!-- Patrimônio: reserva, investimentos, negócios, bens, menos dívidas -->
       <div class="section-title-row">
         <span>🏛️ Patrimônio</span>
@@ -755,6 +762,25 @@
     <div id="rv-lista"></div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="fecharModal('modal-revisar')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL INVESTIMENTOS ══ -->
+<div id="modal-invest" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-invest')">
+  <div class="modal-sheet iv-sheet">
+    <div class="modal-handle"></div>
+    <h3>📈 Investimentos</h3>
+    <div class="iv-abas">
+      <button data-aba="indicadores" onclick="abaInvest('indicadores')">📊 Indicadores</button>
+      <button data-aba="simulador" onclick="abaInvest('simulador')">🧮 Simulador</button>
+      <button data-aba="carteira" onclick="abaInvest('carteira')">💼 Carteira</button>
+      <button data-aba="acompanhar" onclick="abaInvest('acompanhar')">👀 Acompanhar</button>
+    </div>
+    <div id="iv-conteudo"></div>
+    <p class="iv-aviso">O app mostra dados e faz contas; não recomenda investimentos. Para decidir onde aplicar, fale com um planejador financeiro certificado (CFP) ou um analista CNPI.</p>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-invest')">Fechar</button>
     </div>
   </div>
 </div>
