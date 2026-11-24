@@ -424,6 +424,7 @@ function criarCartao(usuarioId, nome, limite, diaFechamento = 1, diaVencimento =
 // Cores de cada banco (cartão com o nome do banco ganha a cor dele; os outros, uma paleta).
 const CORES_BANCO = [
   [/nubank|\bnu\b/, ['#820AD1', '#4B0082']],
+  [/azul/, ['#1F4FBF', '#0B1F6B']],
   [/ita[uú]/, ['#EC7000', '#B34F00']],
   [/neon/, ['#00B4E6', '#0B1F4B']],
   [/caixa/, ['#0070AF', '#F39200']],
