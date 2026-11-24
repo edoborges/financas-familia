@@ -421,7 +421,36 @@ function criarCartao(usuarioId, nome, limite, diaFechamento = 1, diaVencimento =
   const cores = gerarCoresCartao(nome)
   return db.prepare('INSERT INTO cartoes (usuario_id, nome, bandeira, limite, dia_fechamento, dia_vencimento, cor1, cor2) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(usuarioId, nome, bandeira, limite, diaFechamento, diaVencimento, cor1 || cores[0], cor2 || cores[1])
 }
+// Cores de cada banco (cartão com o nome do banco ganha a cor dele; os outros, uma paleta).
+const CORES_BANCO = [
+  [/nubank|\bnu\b/, ['#820AD1', '#4B0082']],
+  [/ita[uú]/, ['#EC7000', '#B34F00']],
+  [/neon/, ['#00B4E6', '#0B1F4B']],
+  [/caixa/, ['#0070AF', '#F39200']],
+  [/mercado ?pago|mercado ?livre/, ['#009EE3', '#00629B']],
+  [/picpay/, ['#21C25E', '#0F7A39']],
+  [/inter\b/, ['#FF7A00', '#D45500']],
+  [/santander/, ['#EC0000', '#8E0000']],
+  [/bradesco/, ['#CC092F', '#7A0019']],
+  [/banco do brasil|\bbb\b/, ['#F8D117', '#0038A8']],
+  [/c6/, ['#2B2B2B', '#000000']],
+  [/xp\b/, ['#1F1F1F', '#000000']],
+  [/sicredi/, ['#3FA110', '#1E5C08']],
+  [/sicoob/, ['#003641', '#00AE9D']]
+]
+function coresDoBanco(nome) {
+  const n = String(nome || '').toLowerCase()
+  const achado = CORES_BANCO.find(([re]) => re.test(n))
+  return achado ? achado[1] : null
+}
+// Cartões que têm nome de banco passam a usar a cor do banco (roda a cada início; é barato).
+for (const c of db.prepare('SELECT id, nome FROM cartoes').all()) {
+  const cores = coresDoBanco(c.nome)
+  if (cores) db.prepare('UPDATE cartoes SET cor1 = ?, cor2 = ? WHERE id = ?').run(cores[0], cores[1], c.id)
+}
 function gerarCoresCartao(nome) {
+  const doBanco = coresDoBanco(nome)
+  if (doBanco) return doBanco
   const paletas = [
     ['#8A05BE','#4A0082'],['#003B6F','#1565C0'],['#CC092F','#8B0000'],
     ['#006400','#1a472a'],['#1a1a2e','#16213e'],['#FF6B35','#cc4400'],
