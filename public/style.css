@@ -1094,3 +1094,15 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .rb-item-dir b{font-size:.88rem;white-space:nowrap}
 .rb-mais summary{font-size:.78rem;color:#4f46e5;font-weight:700;cursor:pointer;padding:8px 0 2px}
 #rc-patrimonio{width:100%;padding:10px;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:6px}
+
+/* ═══ Livre para gastar (Início) ═══ */
+.lv-card{border-radius:16px;padding:14px 16px;margin-bottom:14px;cursor:pointer;box-shadow:var(--shadow)}
+.lv-card.ok{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1px solid #a7f3d0}
+.lv-card.neg{background:linear-gradient(135deg,#fff1f2,#ffe4e6);border:1px solid #fecdd3}
+.lv-label{font-size:.78rem;font-weight:700;color:#334155}
+.lv-valor{font-size:1.6rem;font-weight:800;margin:2px 0}
+.lv-card.ok .lv-valor{color:#047857}
+.lv-card.neg .lv-valor{color:#be123c}
+.lv-sub{font-size:.76rem;color:#475569;line-height:1.4}
+.lv-estouro{margin-top:9px;background:#be123c;color:#fff;border-radius:10px;padding:8px 10px;font-size:.76rem;font-weight:700;line-height:1.35}
+.lv-dica{margin-top:8px;font-size:.74rem;color:#64748b}

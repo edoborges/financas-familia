@@ -121,6 +121,24 @@ async function verificarRecebiveis(usuarioId) {
   return n
 }
 
+// Saldo previsto passando do limite do cheque especial nos próximos 30 dias: avisa uma vez
+// por mês do estouro (e de novo se a data prevista mudar de mês).
+async function verificarChequeEspecial(usuarioId, hoje) {
+  const r = db.livreParaGastar(null, usuarioId)
+  if (!r || !r.estouro || r.estouro.data > db.somaDias(hoje, 30)) return 0
+  const chave = 'cheque:' + r.estouro.data.slice(0, 7)
+  if (db.jaNotificado(usuarioId, chave, 'estouro')) return 0
+  const fmt = v => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const n = await enviarParaUsuario(usuarioId, {
+    title: '🚨 Cheque especial vai estourar',
+    body: `Pela previsão, em ${r.estouro.data.split('-').reverse().join('/')} o saldo chega a ${fmt(r.estouro.saldo)}, além do limite de ${fmt(r.limite)}. Veja na Agenda o que vence até lá.`,
+    tag: 'cheque-especial',
+    url: '/?aba=agenda&dia=' + r.estouro.data
+  })
+  if (n > 0) db.registrarNotificacao(usuarioId, chave, 'estouro')
+  return n
+}
+
 // Avisa uma vez ao passar de 80% e outra ao estourar, por categoria e por mês.
 async function verificarOrcamentos(usuarioId, hoje) {
   const [ano, mes] = hoje.split('-').map(Number)
@@ -166,6 +184,7 @@ async function verificarLembretes({ forcar = false } = {}) {
         enviados += await verificarContas(uid, hoje)
         enviados += await verificarOrcamentos(uid, hoje)
         enviados += await verificarRecebiveis(uid)
+        enviados += await verificarChequeEspecial(uid, hoje)
       } catch (e) {
         console.error(`lembretes do usuário ${uid} falharam:`, e.message)
       }

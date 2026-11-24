@@ -311,6 +311,14 @@ router.post('/cartoes', (req, res) => {
   }
 })
 
+// Quanto dá para gastar até a próxima entrada + aviso de cheque especial.
+router.get('/livre-para-gastar', (req, res) => {
+  try {
+    const { familiaId, usuarioId } = req.query
+    res.json(db.livreParaGastar(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+
 // ===== VALORES A RECEBER =====
 const dataOk = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
 router.get('/recebiveis', (req, res) => {
@@ -447,9 +455,9 @@ router.get('/contas', (req, res) => {
 
 router.post('/contas', (req, res) => {
   try {
-    const { usuarioId, nome, banco, tipo, saldo, cor } = req.body
+    const { usuarioId, nome, banco, tipo, saldo, cor, limite } = req.body
     if (!usuarioId || !nome) return res.status(400).json({ erro: 'Dados incompletos' })
-    const result = db.criarConta(usuarioId, nome, banco, tipo, saldo, cor)
+    const result = db.criarConta(usuarioId, nome, banco, tipo, saldo, cor, limite)
     res.json({ id: Number(result.lastInsertRowid) })
   } catch (e) {
     console.error('POST /contas erro:', e.message)
@@ -458,8 +466,8 @@ router.post('/contas', (req, res) => {
 })
 
 router.put('/contas/:id', (req, res) => {
-  const { nome, banco, tipo, saldo } = req.body
-  if (nome) db.atualizarConta(req.params.id, nome, banco, tipo, saldo)
+  const { nome, banco, tipo, saldo, limite } = req.body
+  if (nome) db.atualizarConta(req.params.id, nome, banco, tipo, saldo, limite)
   else db.atualizarSaldoConta(req.params.id, saldo)
   res.json({ ok: true })
 })

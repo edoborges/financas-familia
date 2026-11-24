@@ -272,6 +272,8 @@ try { db.exec("ALTER TABLE receitas_programadas ADD COLUMN estimada INTEGER DEFA
 try { db.exec("ALTER TABLE gastos_recorrentes ADD COLUMN cartao_id INTEGER") } catch(e) {}
 // Consignado: a parcela sai do salário antes de cair na conta, então não vira conta a pagar.
 try { db.exec("ALTER TABLE emprestimos ADD COLUMN desconto_folha INTEGER DEFAULT 0") } catch(e) {}
+// Limite do cheque especial da conta (para o alerta de estouro).
+try { db.exec("ALTER TABLE contas ADD COLUMN limite REAL DEFAULT 0") } catch(e) {}
 
 // Seed: garante que a família principal existe e usuários legados ficam nela
 const famCount = db.prepare('SELECT COUNT(*) as n FROM familias').get()
@@ -324,8 +326,8 @@ function listarUsuarios(familiaId = null) {
 }
 
 // ===== CONTAS =====
-function criarConta(usuarioId, nome, banco, tipo, saldo, cor) {
-  return db.prepare('INSERT INTO contas (usuario_id, nome, banco, tipo, saldo, cor) VALUES (?, ?, ?, ?, ?, ?)').run(usuarioId, nome, banco || '', tipo || 'corrente', saldo || 0, cor || '#2980b9')
+function criarConta(usuarioId, nome, banco, tipo, saldo, cor, limite = 0) {
+  return db.prepare('INSERT INTO contas (usuario_id, nome, banco, tipo, saldo, cor, limite) VALUES (?, ?, ?, ?, ?, ?, ?)').run(usuarioId, nome, banco || '', tipo || 'corrente', saldo || 0, cor || '#2980b9', Math.max(0, Number(limite) || 0))
 }
 function listarContas(familiaId = null, usuarioId = null) {
   if (usuarioId) return db.prepare('SELECT c.*, u.nome as usuario_nome FROM contas c JOIN usuarios u ON c.usuario_id = u.id WHERE c.usuario_id = ?').all(usuarioId)
@@ -335,8 +337,8 @@ function listarContas(familiaId = null, usuarioId = null) {
 function atualizarSaldoConta(id, saldo) {
   return db.prepare('UPDATE contas SET saldo = ? WHERE id = ?').run(saldo, id)
 }
-function atualizarConta(id, nome, banco, tipo, saldo) {
-  return db.prepare('UPDATE contas SET nome=?, banco=?, tipo=?, saldo=? WHERE id=?').run(nome, banco, tipo, saldo, id)
+function atualizarConta(id, nome, banco, tipo, saldo, limite = null) {
+  return db.prepare('UPDATE contas SET nome=?, banco=?, tipo=?, saldo=?, limite=COALESCE(?, limite) WHERE id=?').run(nome, banco, tipo, saldo, limite == null ? null : Math.max(0, Number(limite) || 0), id)
 }
 function deletarConta(id) {
   return db.prepare('DELETE FROM contas WHERE id = ?').run(id)
@@ -1442,6 +1444,49 @@ function removerCreditoFatura(id) {
   return db.prepare('DELETE FROM fatura_creditos WHERE id = ?').run(id)
 }
 
+// "Quanto posso gastar até a próxima entrada": o menor saldo previsto (o mesmo da Agenda)
+// entre hoje e a véspera da próxima renda programada. Se ficar negativo, nem gastando zero
+// o dinheiro chega. Também acha o primeiro dia em que o saldo passa do cheque especial.
+function livreParaGastar(familiaId = null, usuarioId = null) {
+  const hoje = hojeBR()
+  const [hy, hm] = hoje.split('-').map(Number)
+  const serie = []
+  const entradas = []
+  for (let k = 0; k < 3; k++) {
+    const [y, m] = _somaMes(hy, hm, k)
+    for (const dia of calendarioMes(familiaId, usuarioId, m, y).dias) {
+      if (dia.saldo == null) continue
+      serie.push({ data: dia.data, saldo: dia.saldo })
+      if (dia.data <= hoje) continue
+      for (const i of dia.itens) {
+        if (i.tipo === 'entrada' && !i.informativo && (i.fonte === 'programada' || i.fonte === 'estimada')) {
+          entradas.push({ data: dia.data, descricao: i.descricao, valor: i.valor, estimada: i.fonte === 'estimada' })
+        }
+      }
+    }
+  }
+  if (!serie.length) return null
+  entradas.sort((a, b) => a.data.localeCompare(b.data))
+  const proxima = entradas[0] || null
+  const fim = proxima ? proxima.data : serie[serie.length - 1].data
+  const janela = serie.filter(s => s.data < fim)
+  if (!janela.length) janela.push(serie[0])
+  const menor = janela.reduce((m, s) => (s.saldo < m.saldo ? s : m), janela[0])
+  const dias = Math.max(1, Math.round((new Date(fim + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 86400000))
+  const contas = listarContas(familiaId, usuarioId)
+  const limite = contas.reduce((a, c) => a + Number(c.limite || 0), 0)
+  const estouro = limite > 0 ? (serie.find(s => s.saldo < -limite) || null) : null
+  return {
+    hoje, dias, proximaEntrada: proxima,
+    saldoHoje: contas.reduce((a, c) => a + Number(c.saldo || 0), 0),
+    livre: +menor.saldo.toFixed(2), menorEm: menor.data,
+    porDia: menor.saldo > 0 ? +(menor.saldo / dias).toFixed(2) : 0,
+    limite, sobraLimite: limite > 0 ? +(limite + menor.saldo).toFixed(2) : null,
+    estouro: estouro ? { data: estouro.data, saldo: +estouro.saldo.toFixed(2) } : null,
+    horizonte: serie[serie.length - 1].data
+  }
+}
+
 // Cópia consistente do banco inteiro num arquivo temporário (funciona com o app rodando).
 function gerarBackup() {
   const arq = path.join(require('os').tmpdir(), `financeiro-backup-${Date.now()}.db`)
@@ -1485,7 +1530,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
-  gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
+  livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
   listarPatrimonio, salvarPatrimonio, deletarPatrimonio, resumoPatrimonio,
   criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,

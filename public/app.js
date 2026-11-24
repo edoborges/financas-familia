@@ -437,6 +437,7 @@ async function carregarInicio() {
     // Meta de renda e contas a pagar
     renderMetaRendaCard()
     renderContasPagar()
+    renderLivre()
 
     // Patrimônio líquido
     renderPatrimonio(resumo)
@@ -1173,6 +1174,7 @@ function abrirEditarConta(conta) {
   document.getElementById('ec-banco').value = conta.banco || ''
   document.getElementById('ec-tipo').value = conta.tipo || 'corrente'
   document.getElementById('ec-saldo').value = String(conta.saldo).replace('.', ',')
+  document.getElementById('ec-limite').value = conta.limite ? String(conta.limite).replace('.', ',') : ''
   document.getElementById('modal-editar-conta').style.display = 'flex'
 }
 async function salvarEdicaoConta() {
@@ -1180,12 +1182,13 @@ async function salvarEdicaoConta() {
   const banco = document.getElementById('ec-banco').value.trim()
   const tipo = document.getElementById('ec-tipo').value
   const saldo = parseBRL(document.getElementById('ec-saldo').value)
+  const limite = parseBRL(document.getElementById('ec-limite').value)
   if (!nome) { toast('Informe o nome!', 'erro'); return }
   try {
     await api(`/contas/${contaEditandoId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, banco, tipo, saldo })
+      body: JSON.stringify({ nome, banco, tipo, saldo, limite })
     })
     fecharModal('modal-editar-conta')
     toast(`✅ Conta "${nome}" atualizada!`)
@@ -1292,9 +1295,10 @@ async function salvarConta() {
   const banco = document.getElementById('ct-banco').value.trim()
   const tipo = document.getElementById('ct-tipo').value
   const saldo = parseBRL(document.getElementById('ct-saldo').value)
+  const limite = parseBRL(document.getElementById('ct-limite').value)
   if (!nome) { toast('Informe o nome da conta!', 'erro'); return }
   try {
-    await api('/contas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, banco, tipo, saldo }) })
+    await api('/contas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuarioId: usuario.id, nome, banco, tipo, saldo, limite }) })
     fecharModal('modal-conta')
     document.getElementById('ct-nome').value = ''
     document.getElementById('ct-banco').value = ''
@@ -3754,6 +3758,36 @@ async function removerCreditoFatura(id) {
   if (!confirm('Remover este abatimento da fatura?')) return
   await api('/creditos-fatura/' + id, { method: 'DELETE' })
   carregarAgenda(); renderContasPagar()
+}
+
+// ── QUANTO POSSO GASTAR ATÉ A PRÓXIMA ENTRADA (Início) ──
+async function renderLivre() {
+  const el = document.getElementById('livre-card')
+  if (!el) return
+  try {
+    const r = await api('/livre-para-gastar' + famQ())
+    if (!r) { el.style.display = 'none'; return }
+    const ate = r.proximaEntrada
+      ? `até ${ddmmStr(r.proximaEntrada.data)} (${escH(r.proximaEntrada.descricao)}${r.proximaEntrada.estimada ? ', estimado' : ''})`
+      : `até ${ddmmStr(r.horizonte)}`
+    const positivo = r.livre > 0
+    const corpo = positivo
+      ? `<div class="lv-label">💵 Livre para gastar ${ate}</div>
+         <div class="lv-valor">${fmt(r.livre)}</div>
+         <div class="lv-sub">≈ ${fmt(r.porDia)} por dia · ${r.dias} dia${r.dias > 1 ? 's' : ''}</div>`
+      : `<div class="lv-label">⚠️ ${ate.charAt(0).toUpperCase() + ate.slice(1)}, faltam</div>
+         <div class="lv-valor">${fmt(-r.livre)}</div>
+         <div class="lv-sub">Mesmo sem gastar mais nada, o saldo previsto chega a ${fmt(r.livre)} em ${ddmmStr(r.menorEm)}.${r.sobraLimite > 0 ? ` Do cheque especial ainda sobram ${fmt(r.sobraLimite)}.` : ''}</div>`
+    const estouro = r.estouro
+      ? `<div class="lv-estouro" onclick="event.stopPropagation(); abrirLink('/?aba=agenda&dia=${r.estouro.data}')">🚨 Em ${ddmmStr(r.estouro.data)} o saldo previsto (${fmt(r.estouro.saldo)}) passa do limite do cheque especial (${fmt(r.limite)}). Ver na Agenda →</div>`
+      : (r.saldoHoje < 0 && !r.limite ? `<div class="lv-dica">Cadastre o limite do cheque especial na conta (aba Contas) para ser avisado antes de estourar.</div>` : '')
+    el.className = 'lv-card ' + (positivo ? 'ok' : 'neg')
+    el.innerHTML = corpo + estouro
+    el.onclick = () => { mostrarAba('agenda'); navBtn('nav-agenda') }
+    el.style.display = 'block'
+  } catch (e) {
+    el.style.display = 'none'
+  }
 }
 
 // ── START ──

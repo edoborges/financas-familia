@@ -150,6 +150,9 @@
         <span class="push-convite-btn">Ativar</span>
       </div>
 
+      <!-- Quanto dá para gastar até a próxima entrada + alerta de cheque especial -->
+      <div id="livre-card" class="lv-card" style="display:none"></div>
+
       <!-- Alertas de vencimento -->
       <div id="alertas-banner" class="alertas-banner" style="display:none"></div>
 
@@ -475,6 +478,8 @@
       <option value="investimento">Investimento</option>
     </select>
     <div class="input-prefix"><span>R$</span><input id="ct-saldo" type="text" inputmode="decimal" placeholder="Ex: 1500,00" /></div>
+    <label class="input-label">Limite do cheque especial (opcional)</label>
+    <div class="input-prefix"><span>R$</span><input id="ct-limite" type="text" inputmode="decimal" placeholder="0,00" /></div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="fecharModal('modal-conta')">Cancelar</button>
       <button class="btn-confirm" onclick="salvarConta()">Salvar Conta</button>
@@ -541,6 +546,8 @@
     </select>
     <label class="input-label">Saldo atual</label>
     <div class="input-prefix"><span>R$</span><input id="ec-saldo" type="text" inputmode="decimal" placeholder="Ex: 1500,00" /></div>
+    <label class="input-label">Limite do cheque especial (opcional)</label>
+    <div class="input-prefix"><span>R$</span><input id="ec-limite" type="text" inputmode="decimal" placeholder="0,00" /></div>
     <div class="modal-btns">
       <button class="btn-cancel btn-delete" onclick="deletarContaAtual()">🗑 Excluir</button>
       <button class="btn-confirm" onclick="salvarEdicaoConta()">Salvar</button>
