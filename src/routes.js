@@ -448,7 +448,13 @@ router.get('/of/contas/:accountId/previa', async (req, res) => {
   const desde = /^\d{4}-\d{2}-\d{2}$/.test(req.query.desde || '') ? req.query.desde : db.somaDias(db.hojeBR(), -15)
   try {
     const r = await of.pluggy(`/v2/transactions?accountId=${encodeURIComponent(oc.account_id)}&dateFrom=${desde}`)
-    res.json({ next: !!r.next, total: (r.results || []).length, movimentos: (r.results || []).map(t => ({
+    // Dados de identificação da conta (agência/conta para transferência), quando o banco manda.
+    let conta = null
+    try {
+      const a = await of.pluggy(`/accounts/${encodeURIComponent(oc.account_id)}`)
+      conta = { nome: a.name, numero: a.number, agenciaConta: a.bankData?.transferNumber || null, tipo: a.subtype }
+    } catch (e) { /* segue sem */ }
+    res.json({ conta, next: !!r.next, total: (r.results || []).length, movimentos: (r.results || []).map(t => ({
       data: t.date, descricao: t.description, valor: t.amount, tipo: t.type, status: t.status, categoria: t.category,
       operacao: t.operationType, metodo: t.paymentData?.paymentMethod,
       parcela: t.creditCardMetadata ? [t.creditCardMetadata.installmentNumber, t.creditCardMetadata.totalInstallments, t.creditCardMetadata.purchaseDate] : null
