@@ -1208,8 +1208,43 @@ function gerarBackup() {
   return arq
 }
 
+// Recomeço "B": apaga os números da família e mantém a estrutura. Ficam usuários, PINs,
+// sessões, avisos do celular, cartões (com dia de fechamento/vencimento) e contas, com
+// saldo e fatura zerados. Sai todo lançamento, dívida, renda programada e gasto fixo.
+function zerarNumerosFamilia(familiaId) {
+  const ids = db.prepare('SELECT id FROM usuarios WHERE familia_id = ?').all(familiaId).map(u => u.id)
+  if (!ids.length) return { usuarios: 0 }
+  const em = `(${ids.map(() => '?').join(',')})`
+  const idsDe = tabela => db.prepare(`SELECT id FROM ${tabela} WHERE usuario_id IN ${em}`).all(...ids).map(r => r.id)
+  const r = {}
+  db.exec('BEGIN')
+  try {
+    // Chaves de "Paguei" que apontam para itens desta família.
+    const chaves = [
+      ...idsDe('cartoes').map(id => `fatura:${id}:%`),
+      ...idsDe('gastos_recorrentes').map(id => `recorrente:${id}:%`),
+      ...idsDe('emprestimos').map(id => `emprestimo:${id}:%`)
+    ]
+    r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
+    for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas']) {
+      r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
+    }
+    r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
+    r.contasZeradas = db.prepare(`UPDATE contas SET saldo = 0 WHERE usuario_id IN ${em}`).run(...ids).changes
+    r.cartoesZerados = db.prepare(`UPDATE cartoes SET gasto_atual = 0 WHERE usuario_id IN ${em}`).run(...ids).changes
+    // Contas de antes de hoje não devem aparecer como atrasadas no recomeço.
+    salvarConfig('pagamentos_desde', hojeBR())
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+  return r
+}
+
 module.exports = {
-  gerarBackup,
+  gerarBackup, zerarNumerosFamilia,
   criarSessao, usuarioDaSessao, encerrarSessao, encerrarOutrasSessoes, semPin, familiaDoRegistro,
   criarFamilia, listarFamilias, obterFamilia, editarFamilia,
   obterUsuario, obterUsuarioPorId, criarUsuario, autenticarUsuario, atualizarSalario, editarUsuario, listarUsuarios,

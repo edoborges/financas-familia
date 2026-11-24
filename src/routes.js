@@ -182,6 +182,22 @@ router.get('/backup', (req, res) => {
   }
 })
 
+// Recomeço: zera os números de uma família (ver db.zerarNumerosFamilia). Só o administrador,
+// e só com a palavra de confirmação.
+router.post('/admin/zerar', (req, res) => {
+  if (req.usuario.role !== 'super_admin') return res.status(403).json({ erro: 'Só o administrador pode zerar' })
+  const { familiaId, confirmacao } = req.body
+  if (confirmacao !== 'ZERAR') return res.status(400).json({ erro: 'Confirmação incorreta' })
+  if (!familiaId) return res.status(400).json({ erro: 'Família não informada' })
+  try {
+    const resultado = db.zerarNumerosFamilia(parseInt(familiaId))
+    console.log(`Família ${familiaId} zerada por ${req.usuario.nome}:`, JSON.stringify(resultado))
+    res.json({ ok: true, resultado })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 router.post('/logout', (req, res) => {
   db.encerrarSessao(req.token)
   res.json({ ok: true })

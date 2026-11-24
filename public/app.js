@@ -2085,6 +2085,32 @@ async function limparImportados() {
   }
 }
 
+// ── RECOMEÇO: ZERAR NÚMEROS DE UMA FAMÍLIA (administrador) ──
+async function zerarFamilia(familiaId, nome) {
+  const palavra = prompt(
+    `Zerar os números de "${nome}"?\n\n` +
+    `SAEM: gastos, receitas, dívidas, rendas programadas, gastos fixos, orçamentos e metas.\n` +
+    `FICAM: usuários, PINs, avisos do celular, cartões e contas (com saldo e fatura em zero).\n\n` +
+    `Não dá para desfazer pelo app. Baixe a cópia de segurança antes.\n\n` +
+    `Digite ZERAR para confirmar:`
+  )
+  if (palavra === null) return
+  if (palavra.trim().toUpperCase() !== 'ZERAR') { toast('Nada foi apagado (palavra diferente de ZERAR).', 'erro'); return }
+  try {
+    const { resultado: r } = await api('/admin/zerar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ familiaId, confirmacao: 'ZERAR' })
+    })
+    alert(`✅ "${nome}" zerada.\n\n` +
+      `Apagados: ${r.gastos} gastos, ${r.receitas} receitas, ${r.emprestimos} dívidas, ` +
+      `${r.receitas_programadas} rendas programadas, ${r.gastos_recorrentes} gastos fixos.\n` +
+      `Zerados: ${r.contasZeradas} contas e ${r.cartoesZerados} cartões.`)
+    mostrarPainelAdmin()
+  } catch (e) {
+    toast('❌ ' + e.message, 'erro')
+  }
+}
+
 // ── CÓPIA DE SEGURANÇA (administrador) ──
 async function baixarBackup() {
   toast('⏳ Gerando cópia...')
@@ -2260,9 +2286,14 @@ async function mostrarPainelAdmin() {
           <div class="admin-fam-nome">🏠 ${f.nome}</div>
           <div class="admin-fam-meta">${f.total_membros} membro${f.total_membros !== 1 ? 's' : ''}</div>
         </div>
-        <button class="btn-visualizar" onclick="visualizarFamilia(${f.id}, '${f.nome.replace(/'/g, "\\'")}')">
-          👁️ Visualizar
-        </button>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button class="btn-visualizar" onclick="visualizarFamilia(${f.id}, '${f.nome.replace(/'/g, "\\'")}')">
+            👁️ Visualizar
+          </button>
+          <button class="btn-visualizar" style="background:#fee2e2;color:#b91c1c" onclick="zerarFamilia(${f.id}, '${f.nome.replace(/'/g, "\\'")}')">
+            🧹 Zerar números
+          </button>
+        </div>
       </div>
     `).join('')
   } catch (e) {
