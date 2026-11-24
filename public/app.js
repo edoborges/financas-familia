@@ -87,6 +87,22 @@ const COR_CAT = {
   'Restaurante':'#f59e0b','Outros':'#94a3b8','Fatura':'#475569'
 }
 const corCat = c => COR_CAT[c] || '#94a3b8'
+const inicialNome = n => (String(n || '?').trim().charAt(0) || '?').toUpperCase()
+// Número do saldo sobe até o valor (só na primeira vez que muda; quem prefere menos movimento vê direto).
+function contarAte(el, valor, prefixo) {
+  const final = prefixo + fmt(valor)
+  const reduz = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reduz || el.dataset.valor === String(valor)) { el.textContent = final; el.dataset.valor = valor; return }
+  const ini = parseFloat(el.dataset.valor || 0) || 0
+  el.dataset.valor = valor
+  const t0 = performance.now(), dur = 700
+  const passo = agora => {
+    const p = Math.min(1, (agora - t0) / dur), e = 1 - Math.pow(1 - p, 3)
+    el.textContent = p < 1 ? prefixo + fmt(ini + (valor - ini) * e) : final
+    if (p < 1) requestAnimationFrame(passo)
+  }
+  requestAnimationFrame(passo)
+}
 const fmt =v => 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})
 
 // Converte valor digitado em formato brasileiro (1.500,00 ou 1500,50 ou 1500.50) para número
@@ -215,12 +231,12 @@ function renderLogin(usuarios) {
     const cel = u.telefone && u.telefone.length >= 4 ? '···· ' + u.telefone.slice(-4) : (u.telefone || '')
     return `
       <button class="login-card" data-idx="${i}">
-        <div class="login-avatar">${AVATARES[i] || '👤'}</div>
+        <div class="login-avatar">${inicialNome(u.nome)}</div>
         <div class="login-info">
           <div class="login-nome">${u.nome}</div>
           <div class="login-sal">${cel ? '📱 ' + cel : 'Toque para entrar'}</div>
         </div>
-        <span class="login-arrow">🔑</span>
+        <span class="login-arrow">›</span>
       </button>
     `
   }).join('')
@@ -239,8 +255,8 @@ function abrirPinModal(idx) {
   pinAtual = ''
   const u = USUARIOS_CACHE[idx]
   if (!u) return
-  document.getElementById('pin-avatar').textContent = AVATARES[idx] || '👤'
-  document.getElementById('pin-nome').textContent = 'Olá, ' + u.nome + '! 👋'
+  document.getElementById('pin-avatar').textContent = inicialNome(u.nome)
+  document.getElementById('pin-nome').textContent = 'Olá, ' + u.nome
   const cel = u.telefone && u.telefone.length >= 4 ? '📱 ···· ' + u.telefone.slice(-4) : ''
   document.getElementById('pin-cel').textContent = cel
   document.getElementById('pin-erro').style.display = 'none'
@@ -378,7 +394,7 @@ async function mostrarApp() {
   document.getElementById('admin-voltar-banner').style.display = adminVisualizandoFamiliaId ? 'flex' : 'none'
   const usuarios = await api('/usuarios')
   const idx = usuarios.findIndex(u => u.id === usuario.id)
-  document.getElementById('h-avatar').textContent = AVATARES[idx] || '👤'
+  document.getElementById('h-avatar').textContent = inicialNome(usuario.nome)
   document.getElementById('h-saudacao').textContent = SAUDACOES() + ','
   document.getElementById('h-nome').textContent = usuario.nome + ' ✏️'
 
@@ -409,8 +425,8 @@ async function carregarInicio() {
 
     // Número principal: resultado do mês (+ ou -)
     const saldoEl = document.getElementById('b-saldo')
-    saldoEl.textContent = (positivo ? '+' : '') + fmt(resultado)
-    saldoEl.style.color = positivo ? '#4ade80' : '#f87171'
+    contarAte(saldoEl, resultado, positivo ? '+' : '')
+    saldoEl.style.color = positivo ? '#8FE0BE' : '#FFB4A8'
 
     // Label contextual — menciona visão
     const visaoLabel = visaoAtual === 'pessoal' ? 'seus dados' : 'dados da família'
@@ -426,7 +442,7 @@ async function carregarInicio() {
     document.getElementById('b-gastos').textContent = fmt(resumo.gastosMes || 0)
     document.getElementById('b-contas').textContent = fmt(resumo.saldoContas || 0)
     document.getElementById('b-mes').textContent = new Date().toLocaleString('pt-BR',{month:'long',year:'numeric'})
-    const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:#4ade80">✓ ${pct}% usado</span>`
+    const alertaPct = pct > 80 ? `<span class="badge-alerta">⚠️ ${pct}% usado</span>` : `<span style="color:rgba(255,255,255,.6)">${pct}% da renda usada</span>`
     const dividas = (resumo.totalEmDividas || 0) > 0 ? `<span class="badge-alerta">💸 Dívidas: ${fmt(resumo.totalEmDividas)}</span>` : ''
     document.getElementById('b-alerta').innerHTML = alertaPct + ' ' + dividas
 
@@ -818,7 +834,7 @@ function txItemHTML(g) {
   const origemClass = g.origem === 'importado' ? ' tx-importado' : g.origem === 'recorrente' ? ' tx-recorrente' : ''
   return `
     <div class="tx-item${origemClass}" id="tx-${g.id}">
-      <div class="tx-emoji">${EMOJI_CAT[g.categoria]||'📦'}</div>
+      <div class="tx-emoji" style="--c:${corCat(g.categoria)}">${EMOJI_CAT[g.categoria]||'📦'}</div>
       <div class="tx-info">
         <div class="tx-desc">${g.descricao}</div>
         <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
@@ -926,7 +942,7 @@ async function carregarMetas() {
   const renda = resumo.rendaTotal || 0
   const economia = renda - resumo.gastosMes
   document.getElementById('plan-resumo').innerHTML = `
-    <div style="color:#e2e8f0;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💡 Visão do Planejamento</div>
+    <div style="color:rgba(255,255,255,.6);font-size:.8rem;font-weight:500;margin-bottom:8px">Visão do planejamento</div>
     <div class="plan-resumo-grid">
       <div class="plan-item">
         <div class="plan-item-label">${visaoAtual === 'consolidado' ? 'Renda do casal' : 'Sua renda'}</div>

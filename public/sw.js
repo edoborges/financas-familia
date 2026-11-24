@@ -1,5 +1,5 @@
-const CACHE = 'financeiro-v2'
-const ASSETS = ['/', '/style.css', '/app.js', '/manifest.json']
+const CACHE = 'financeiro-v3'
+const ASSETS = ['/', '/style.css', '/visual.css', '/icones.js', '/app.js', '/manifest.json']
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)))
