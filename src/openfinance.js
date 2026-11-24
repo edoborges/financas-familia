@@ -31,7 +31,9 @@ async function pluggy(caminho, opts = {}) {
 }
 
 async function connectToken(usuarioId) {
-  const r = await pluggy('/connect_token', { method: 'POST', body: JSON.stringify({ options: { clientUserId: String(usuarioId), avoidDuplicates: true } }) })
+  // Sem avoidDuplicates: no Meu Pluggy cada banco autorizado vira uma conexão própria, e com essa
+  // opção a Pluggy recusava autorizar um segundo banco ("erro inesperado" no widget).
+  const r = await pluggy('/connect_token', { method: 'POST', body: JSON.stringify({ options: { clientUserId: String(usuarioId) } }) })
   return r.accessToken
 }
 
