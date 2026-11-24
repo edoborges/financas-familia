@@ -145,7 +145,13 @@ async function init() {
     try {
       usuario = JSON.parse(salvo)
       usuario.id = Number(usuario.id)
-      mostrarApp()
+      // Admin com login salvo volta para o painel dele, como logo após digitar o PIN.
+      if (usuario.role === 'super_admin') {
+        show('app')
+        mostrarPainelAdmin()
+      } else {
+        mostrarApp()
+      }
       return
     } catch(e) {
       localStorage.removeItem('fin_usuario')
