@@ -99,4 +99,75 @@ async function valorAtual(inv) {
   return { valor: Number(inv.valor_atual || inv.valor_aplicado || 0) }
 }
 
-module.exports = { cotacao, indicadores, valorAtual, simboloYahoo }
+// ── Monitor: maiores altas e quedas do dia entre as ações do Ibovespa ──
+// Lista aproximada da carteira do índice (as mais negociadas). Código que deixar de existir
+// simplesmente não volta cotação e fica de fora.
+const IBOV = ['ABEV3', 'ALOS3', 'ASAI3', 'AXIA3', 'AXIA6', 'AZZA3', 'B3SA3', 'BBAS3', 'BBDC3', 'BBDC4', 'BBSE3', 'BEEF3', 'BPAC11',
+  'BRAP4', 'BRAV3', 'BRKM5', 'CMIG4', 'CMIN3', 'COGN3', 'CPFE3', 'CPLE6', 'CSAN3', 'CSMG3', 'CSNA3', 'CURY3', 'CVCB3', 'CXSE3', 'CYRE3',
+  'DIRR3', 'EGIE3', 'ELET3', 'ELET6', 'EMBR3', 'ENEV3', 'ENGI11', 'EQTL3', 'FLRY3', 'GGBR4', 'GOAU4', 'HAPV3', 'HYPE3', 'IGTI11',
+  'IRBR3', 'ISAE4', 'ITSA4', 'ITUB4', 'KLBN11', 'LREN3', 'MBRF3', 'MGLU3', 'MOTV3', 'MRVE3', 'MULT3', 'NATU3', 'PCAR3', 'PETR3',
+  'PETR4', 'POMO4', 'PRIO3', 'PSSA3', 'RADL3', 'RAIL3', 'RAIZ4', 'RDOR3', 'RECV3', 'RENT3', 'SANB11', 'SBSP3', 'SLCE3', 'SMFT3',
+  'STBP3', 'SUZB3', 'TAEE11', 'TIMS3', 'TOTS3', 'UGPA3', 'USIM5', 'VALE3', 'VAMO3', 'VBBR3', 'VIVA3', 'VIVT3', 'WEGE3', 'YDUQ3']
+
+async function lote(tickers) {
+  const r = await fetch(`https://query1.finance.yahoo.com/v7/finance/spark?symbols=${tickers.map(t => t + '.SA').join(',')}&range=1d&interval=1d`, {
+    headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000)
+  })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const j = await r.json()
+  return (j.spark?.result || []).map(x => {
+    const m = x.response?.[0]?.meta
+    if (!m?.regularMarketPrice) return null
+    const anterior = Number(m.chartPreviousClose || m.previousClose || 0)
+    const variacao = m.regularMarketChangePercent != null ? Number(m.regularMarketChangePercent)
+      : (anterior ? (m.regularMarketPrice / anterior - 1) * 100 : null)
+    if (variacao == null) return null
+    return {
+      ticker: String(x.symbol).replace('.SA', ''), nome: m.longName || m.shortName || x.symbol,
+      preco: Number(m.regularMarketPrice), variacao,
+      max52: m.fiftyTwoWeekHigh != null ? Number(m.fiftyTwoWeekHigh) : null,
+      min52: m.fiftyTwoWeekLow != null ? Number(m.fiftyTwoWeekLow) : null,
+      horario: m.regularMarketTime ? new Date(m.regularMarketTime * 1000).toISOString() : null
+    }
+  }).filter(Boolean)
+}
+
+async function monitor() {
+  return emCache('monitor', 10 * 60 * 1000, async () => {
+    const grupos = []
+    for (let i = 0; i < IBOV.length; i += 15) grupos.push(IBOV.slice(i, i + 15))
+    const todos = (await Promise.all(grupos.map(g => lote(g).catch(() => [])))).flat()
+    if (!todos.length) throw new Error('Cotações indisponíveis agora')
+    const ordenados = [...todos].sort((a, b) => b.variacao - a.variacao)
+    return {
+      altas: ordenados.filter(a => a.variacao > 0).slice(0, 10),
+      quedas: ordenados.filter(a => a.variacao < 0).reverse().slice(0, 10),
+      sobem: todos.filter(a => a.variacao > 0).length,
+      caem: todos.filter(a => a.variacao < 0).length,
+      total: todos.length,
+      atualizadoEm: todos.map(a => a.horario).filter(Boolean).sort().pop() || null
+    }
+  })
+}
+
+// Manchetes recentes sobre a ação (Google Notícias, em português): só título, veículo, data e link.
+async function noticias(ticker) {
+  const t = String(ticker || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)
+  return emCache('news:' + t, 30 * 60 * 1000, async () => {
+    const r = await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(t + ' ações when:7d')}&hl=pt-BR&gl=BR&ceid=BR:pt-419`, { signal: AbortSignal.timeout(15000) })
+    if (!r.ok) throw new Error(`Notícias indisponíveis (HTTP ${r.status})`)
+    const xml = await r.text()
+    const tira = s => String(s || '').replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim()
+    const itens = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 5).map(m => {
+      const b = m[1]
+      const campo = n => tira((b.match(new RegExp(`<${n}[^>]*>([\\s\\S]*?)<\\/${n}>`)) || [])[1])
+      const fonte = campo('source')
+      let titulo = campo('title')
+      if (fonte && titulo.endsWith(' - ' + fonte)) titulo = titulo.slice(0, -(fonte.length + 3))
+      return { titulo, fonte, link: campo('link'), data: campo('pubDate') ? new Date(campo('pubDate')).toISOString() : null }
+    })
+    return itens.filter(n => n.titulo && /^https?:\/\//.test(n.link))
+  })
+}
+
+module.exports = { cotacao, indicadores, valorAtual, simboloYahoo, monitor, noticias }

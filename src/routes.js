@@ -334,6 +334,12 @@ const daFamilia = (req, usuarioId) => req.usuario.role === 'super_admin' || db.f
 router.get('/invest/indicadores', async (req, res) => {
   try { res.json(await inv.indicadores()) } catch (e) { res.status(502).json({ erro: e.message }) }
 })
+router.get('/invest/monitor', async (req, res) => {
+  try { res.json(await inv.monitor()) } catch (e) { res.status(502).json({ erro: e.message }) }
+})
+router.get('/invest/noticias/:ticker', async (req, res) => {
+  try { res.json(await inv.noticias(req.params.ticker)) } catch (e) { res.status(502).json({ erro: e.message }) }
+})
 router.get('/invest/cotacao/:ticker', async (req, res) => {
   try { res.json(await inv.cotacao(req.params.ticker)) } catch (e) { res.status(404).json({ erro: e.message }) }
 })

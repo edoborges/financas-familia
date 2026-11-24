@@ -1153,7 +1153,7 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .iv-up{color:#059669 !important}
 .iv-down{color:#e11d48 !important}
 .iv-sheet{max-height:92vh;overflow-y:auto}
-.iv-abas{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin-bottom:12px}
+.iv-abas{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#f1f5f9;border-radius:12px;padding:4px;margin-bottom:12px}
 .iv-abas button{border:none;background:none;border-radius:9px;padding:8px 2px;font-size:.7rem;font-weight:700;color:#475569;cursor:pointer}
 .iv-abas button.on{background:var(--card);color:#4338ca;box-shadow:var(--shadow)}
 .iv-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
@@ -1176,3 +1176,20 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .iv-add input{flex:1}
 .iv-add .btn-confirm{flex:0 0 52px}
 #sim-meses{width:100%}
+
+/* ═══ Monitor de ações ═══ */
+.mn-topo{margin-bottom:8px}
+.mn-seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#f1f5f9;border-radius:10px;padding:3px;margin-bottom:6px}
+.mn-seg button{border:none;background:none;border-radius:8px;padding:7px;font-size:.76rem;font-weight:700;color:#475569;cursor:pointer}
+.mn-seg button.on{background:var(--card);color:#111827;box-shadow:var(--shadow)}
+.mn-item{border-bottom:1px solid #f1f5f9;padding:9px 2px;cursor:pointer}
+.mn-linha{display:flex;align-items:center;gap:10px}
+.mn-pos{width:20px;font-size:.72rem;color:#94a3b8;font-weight:800}
+.mn-info{flex:1;min-width:0}
+.mn-info .pt-item-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mn-extra{padding:8px 0 2px 30px}
+.mn-news-tit{font-size:.72rem;font-weight:800;color:#334155;margin:6px 0 4px}
+.mn-noticia{display:block;font-size:.78rem;color:#1e293b;text-decoration:none;padding:6px 0;border-top:1px solid #f1f5f9;line-height:1.35}
+.mn-noticia span{display:block;font-size:.68rem;color:#64748b;margin-top:2px}
+.mn-extra .rv-btn{margin-top:8px}
+.iv-abas button{font-size:.64rem}

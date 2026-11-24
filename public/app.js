@@ -4063,7 +4063,65 @@ function abaInvest(aba) {
   document.querySelectorAll('.iv-abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba))
   const el = document.getElementById('iv-conteudo')
   el.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
-  ;({ indicadores: renderIvIndicadores, simulador: renderIvSimulador, carteira: renderIvCarteira, acompanhar: renderIvAcompanhar })[aba]()
+  ;({ monitor: renderIvMonitor, indicadores: renderIvIndicadores, simulador: renderIvSimulador, carteira: renderIvCarteira, acompanhar: renderIvAcompanhar })[aba]()
+}
+
+// ── Monitor: maiores altas e quedas do Ibovespa, com as manchetes de cada ação ──
+let ivMonitorLado = 'altas'
+async function renderIvMonitor() {
+  const el = document.getElementById('iv-conteudo')
+  try {
+    const m = await api('/invest/monitor')
+    window._ivMonitor = m
+    const lista = ivMonitorLado === 'altas' ? m.altas : m.quedas
+    el.innerHTML = `
+      <div class="mn-topo">
+        <div class="mn-seg">
+          <button class="${ivMonitorLado === 'altas' ? 'on' : ''}" onclick="ivMonitorLado='altas';renderIvMonitor()">📈 Maiores altas</button>
+          <button class="${ivMonitorLado === 'quedas' ? 'on' : ''}" onclick="ivMonitorLado='quedas';renderIvMonitor()">📉 Maiores quedas</button>
+        </div>
+        <div class="of-sub">Ações do Ibovespa hoje: <b class="iv-up">${m.sobem} sobem</b> · <b class="iv-down">${m.caem} caem</b>${m.atualizadoEm ? ' · ' + new Date(m.atualizadoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+      </div>
+      ${lista.length ? lista.map((x, i) => {
+        const daMax = x.max52 ? (x.preco / x.max52 - 1) * 100 : null
+        return `<div class="mn-item" onclick="abrirNoticias('${x.ticker}', this)">
+          <div class="mn-linha">
+            <span class="mn-pos">${i + 1}</span>
+            <div class="mn-info"><b>${escH(x.ticker)}</b><div class="pt-item-sub">${escH(x.nome)}</div></div>
+            <div style="text-align:right"><b class="${x.variacao >= 0 ? 'iv-up' : 'iv-down'}">${pct(x.variacao)}</b><div class="pt-item-sub">${fmt(x.preco)}</div></div>
+          </div>
+          <div class="mn-extra" style="display:none">
+            ${x.min52 && x.max52 ? `<div class="of-sub">52 semanas: mínima ${fmt(x.min52)} · máxima ${fmt(x.max52)}${daMax != null ? ` · está ${pct(daMax, 1)} da máxima` : ''}</div>` : ''}
+            <div class="mn-news"><div class="plano-loading"><div class="spinner"></div></div></div>
+            <button class="rv-btn" onclick="event.stopPropagation();acompanharDoMonitor('${x.ticker}', this)">👀 Acompanhar</button>
+          </div>
+        </div>`
+      }).join('') : '<div class="pt-vazio">Nenhuma ação nesse lado hoje (ou o pregão ainda não abriu).</div>'}
+      <p class="of-sub">Toque numa ação para ver as notícias que podem explicar o movimento. Uma alta ou queda de um dia, sozinha, não diz se a ação é boa ou ruim — é só o que aconteceu hoje.</p>`
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Monitor indisponível agora: ${escH(e.message)}</div>` }
+}
+
+async function abrirNoticias(ticker, card) {
+  const extra = card.querySelector('.mn-extra')
+  const aberto = extra.style.display !== 'none'
+  extra.style.display = aberto ? 'none' : 'block'
+  if (aberto || extra.dataset.carregado) return
+  extra.dataset.carregado = '1'
+  const box = extra.querySelector('.mn-news')
+  try {
+    const n = await api('/invest/noticias/' + encodeURIComponent(ticker))
+    box.innerHTML = n.length
+      ? '<div class="mn-news-tit">📰 Notícias recentes</div>' + n.map(x => `<a class="mn-noticia" href="${escH(x.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escH(x.titulo)}<span>${escH(x.fonte || '')}${x.data ? ' · ' + new Date(x.data).toLocaleDateString('pt-BR') : ''}</span></a>`).join('')
+      : '<div class="of-sub">Nenhuma notícia recente encontrada.</div>'
+  } catch (e) { box.innerHTML = '<div class="of-sub">Notícias indisponíveis agora.</div>' }
+}
+
+async function acompanharDoMonitor(ticker, btn) {
+  try {
+    await api('/invest/acompanhar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticker }) })
+    btn.textContent = '✓ Na sua lista'
+    btn.disabled = true
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
 }
 
 // ── Indicadores ──
