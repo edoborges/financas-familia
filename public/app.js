@@ -438,6 +438,7 @@ async function carregarInicio() {
     renderMetaRendaCard()
     renderContasPagar()
     renderLivre()
+    renderBannerRevisar()
 
     // Patrimônio líquido
     renderPatrimonio(resumo)
@@ -3851,6 +3852,177 @@ async function desfazerTransferencia(id) {
   if (!confirm('Desfazer esta transferência? Os saldos das contas voltam como estavam.')) return
   await api('/transferencias/' + id, { method: 'DELETE' })
   carregarContas(); renderLivre()
+}
+
+// ══════════════════════════════════════════
+//  OPEN FINANCE (Meu Pluggy)
+// ══════════════════════════════════════════
+const PLUGGY_CONNECT_JS = 'https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js'
+const CATS_GASTO = ['Mercado','Alimentação','Restaurante','Combustível','Transporte','Casa','Saúde','Farmácia','Educação','Lazer','Vestuário','Assinatura','Financiamento','Outros']
+let ofStatus = null
+
+async function renderBannerRevisar() {
+  const el = document.getElementById('of-revisar-banner')
+  if (!el) return
+  try {
+    const s = await api('/of/status' + famQ())
+    ofStatus = s
+    if (s.revisar > 0) {
+      el.innerHTML = `🔎 <b>${s.revisar}</b> movimento${s.revisar > 1 ? 's' : ''} do banco para revisar <span>→</span>`
+      el.style.display = 'flex'
+    } else el.style.display = 'none'
+  } catch (e) { el.style.display = 'none' }
+}
+
+function carregarPluggyConnect() {
+  if (window.PluggyConnect) return Promise.resolve()
+  return new Promise((ok, falha) => {
+    const s = document.createElement('script')
+    s.src = PLUGGY_CONNECT_JS
+    s.onload = ok
+    s.onerror = () => falha(new Error('Não foi possível carregar o conector da Pluggy'))
+    document.head.appendChild(s)
+  })
+}
+
+async function abrirConexoes() {
+  document.getElementById('modal-conexoes').style.display = 'flex'
+  const el = document.getElementById('of-conteudo')
+  el.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
+  try {
+    const [s, contasApp, cartoesApp] = await Promise.all([api('/of/status' + famQ()), api('/contas?familiaId=' + famId()), api('/cartoes?familiaId=' + famId())])
+    ofStatus = s
+    if (!s.configurado) {
+      el.innerHTML = `<div class="push-passos">
+        <b>Falta configurar o servidor.</b> No painel do <b>Railway</b> → serviço do app → <b>Variables</b>, crie:
+        <ul><li><code>PLUGGY_CLIENT_ID</code></li><li><code>PLUGGY_CLIENT_SECRET</code></li></ul>
+        Os dois valores ficam na sua aplicação em <b>dashboard.pluggy.ai</b>. Depois de salvar, o app reinicia e esta tela libera o botão de conectar.
+      </div>`
+      return
+    }
+    const optConta = (sel) => '<option value="">— não ligar —</option>' + contasApp.map(c => `<option value="${c.id}" ${Number(sel) === c.id ? 'selected' : ''}>${escH(c.nome)} (${escH(c.usuario_nome || '')})</option>`).join('')
+    const optCartao = (sel) => '<option value="">— não ligar —</option>' + cartoesApp.map(c => `<option value="${c.id}" ${Number(sel) === c.id ? 'selected' : ''}>💳 ${escH(c.nome)} (${escH(c.usuario_nome || '')})</option>`).join('')
+    const porItem = {}
+    for (const c of s.contas) (porItem[c.item_id] ||= []).push(c)
+    el.innerHTML = `
+      <p class="modal-desc">Os dados vêm do <b>Meu Pluggy</b> (Open Finance, só leitura). Ligue cada conta do banco à conta ou ao cartão do app — só então os movimentos começam a entrar (a partir da data de hoje, para não duplicar o que já foi lançado).</p>
+      ${s.itens.length ? s.itens.map(it => `
+        <div class="of-item">
+          <div class="of-item-topo">
+            <div><b>🏦 ${escH((/meupluggy/i.test(it.banco || '') && (porItem[it.item_id] || []).length) ? porItem[it.item_id].map(c => c.nome).join(' + ') : (it.banco || 'Conexão'))}</b>
+              <div class="of-sub">${it.erro ? '⚠️ ' + escH(it.erro) : (it.ultimo_sync ? 'atualizado em ' + new Date(it.ultimo_sync.replace(' ', 'T') + 'Z').toLocaleString('pt-BR') : 'ainda não sincronizou')} · ${escH(it.usuario_nome || '')}</div></div>
+            <button class="cal-desfazer" onclick="removerConexao('${it.item_id}')">remover</button>
+          </div>
+          ${(porItem[it.item_id] || []).map(c => `
+            <div class="of-conta">
+              <div class="of-conta-nome">${c.tipo === 'CREDIT' ? '💳' : '🏦'} ${escH(c.nome || '')}${c.numero ? ' ·' + escH(String(c.numero).slice(-4)) : ''} <span class="of-sub">${c.tipo === 'CREDIT' ? 'fatura' : 'saldo'} ${fmt(c.saldo)}</span></div>
+              ${c.ignorar ? `<div class="of-sub">ignorada · <a href="#" onclick="event.preventDefault();ligarContaOF('${c.account_id}', {ignorar:false})">voltar a usar</a></div>` : `
+              <div class="of-conta-acoes">
+                <select onchange="ligarContaOF('${c.account_id}', ${c.tipo === 'CREDIT' ? '{cartaoId:this.value}' : '{contaId:this.value}'})">${c.tipo === 'CREDIT' ? optCartao(c.cartao_id) : optConta(c.conta_id)}</select>
+                <button class="cal-desfazer" onclick="ligarContaOF('${c.account_id}', {ignorar:true})">ignorar</button>
+              </div>
+              <div class="of-sub">${(c.conta_id || c.cartao_id) ? '✅ importando movimentos desde ' + dataBR(c.importar_desde) : 'escolha a conta/cartão do app para começar a importar'}</div>`}
+            </div>`).join('') || '<div class="of-sub">Nenhuma conta encontrada ainda.</div>'}
+        </div>`).join('') : '<div class="pt-vazio">Nenhum banco conectado ainda.</div>'}
+      <button class="btn-confirm of-conectar" onclick="conectarPluggy()">＋ Conectar banco (Meu Pluggy)</button>
+      ${s.itens.length ? '<button class="pg-so-marcar" onclick="sincronizarOF(this)">🔄 Sincronizar agora</button>' : ''}`
+  } catch (e) {
+    el.innerHTML = `<div class="pt-vazio">Erro: ${escH(e.message)}</div>`
+  }
+}
+
+async function conectarPluggy() {
+  try {
+    await carregarPluggyConnect()
+    const { accessToken } = await api('/of/connect-token', { method: 'POST' })
+    const widget = new window.PluggyConnect({
+      connectToken: accessToken,
+      onSuccess: async (dados) => {
+        const item = dados && (dados.item || dados)
+        if (!item || !item.id) return
+        toast('⏳ Buscando contas…')
+        try {
+          await api('/of/itens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemId: item.id }) })
+          toast('✅ Banco conectado! Agora ligue cada conta.')
+        } catch (e) { toast('❌ ' + e.message, 'erro') }
+        abrirConexoes()
+      },
+      onError: (erro) => toast('❌ ' + ((erro && erro.message) || 'Erro na conexão'), 'erro')
+    })
+    widget.init()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+async function ligarContaOF(accountId, campos) {
+  try {
+    await api('/of/contas/' + accountId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(campos) })
+    toast('✅ Salvo')
+    abrirConexoes()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function removerConexao(itemId) {
+  if (!confirm('Remover esta conexão? O app para de receber os dados desse banco (o que já foi lançado continua).')) return
+  await api('/of/itens/' + itemId, { method: 'DELETE' })
+  abrirConexoes()
+}
+async function sincronizarOF(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando…' }
+  try {
+    const r = await api('/of/sincronizar' + famQ(), { method: 'POST' })
+    const novos = r.reduce((a, x) => a + (x.novos || 0), 0)
+    const erros = r.filter(x => !x.ok)
+    toast(erros.length ? '⚠️ ' + erros[0].erro : `✅ ${novos} movimento${novos === 1 ? '' : 's'} novo${novos === 1 ? '' : 's'}`, erros.length ? 'erro' : 'sucesso')
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+  abrirConexoes(); carregarInicio()
+}
+
+// ── Lista "Para revisar" ──
+let rvPendentes = []
+async function abrirRevisar() {
+  document.getElementById('modal-revisar').style.display = 'flex'
+  const el = document.getElementById('rv-lista')
+  el.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
+  const [lista, pagar] = await Promise.all([api('/of/revisar' + famQ()), api('/contas-a-pagar' + famQ() + (famQ() ? '&' : '?') + 'dias=15')])
+  rvPendentes = pagar.filter(c => !c.pago)
+  if (!lista.length) { el.innerHTML = '<div class="pt-vazio">Tudo revisado 🎉</div>'; renderBannerRevisar(); return }
+  const rotulo = { gasto: '💸 Gasto', receita: '💰 Receita', transferencia: '⇄ Transferência', pagamento: '🧾 Pagamento de conta', ignorar: '🚫 Ignorar' }
+  el.innerHTML = lista.map(t => `
+    <div class="rv-item" id="rv-${t.tx_id}">
+      <div class="rv-topo">
+        <div class="rv-info"><div class="rv-desc">${escH(t.descricao)}</div>
+          <div class="of-sub">${dataBR(t.data)} · ${escH(t.conta_banco || '')}${t.contraparte ? ' · ' + escH(t.contraparte) : ''}</div></div>
+        <b class="${t.direcao === 'entrada' ? 'rv-entra' : 'rv-sai'}">${t.direcao === 'entrada' ? '+' : '−'}${fmt(t.valor)}</b>
+      </div>
+      <div class="rv-sugestao">Sugestão: <b>${rotulo[t.sugestao] || t.sugestao}</b>${t.sugestao === 'gasto' && t.sugestao_categoria ? ' · ' + escH(t.sugestao_categoria) : ''}</div>
+      <div class="rv-acoes">
+        ${t.direcao === 'saida' ? `<select id="rv-cat-${t.tx_id}">${CATS_GASTO.map(c => `<option ${c === (t.sugestao_categoria || 'Outros') ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          <button class="rv-btn" onclick="decidirOF('${t.tx_id}','gasto')">💸 Gasto</button>
+          <button class="rv-btn" onclick="decidirOF('${t.tx_id}','pagamento')">🧾 Pagou conta</button>`
+        : `<button class="rv-btn" onclick="decidirOF('${t.tx_id}','receita')">💰 Receita</button>
+          <button class="rv-btn" onclick="decidirOF('${t.tx_id}','receita','salario')">💼 Salário</button>`}
+        <button class="rv-btn" onclick="decidirOF('${t.tx_id}','transferencia')">⇄ Transferência</button>
+        <button class="rv-btn rv-ign" onclick="decidirOF('${t.tx_id}','ignorar')">Ignorar</button>
+      </div>
+      <label class="rv-lembrar"><input type="checkbox" id="rv-lem-${t.tx_id}"> lembrar para os próximos parecidos</label>
+    </div>`).join('')
+}
+
+async function decidirOF(txId, acao, tipoReceita) {
+  const body = { acao, tipoReceita, lembrar: document.getElementById('rv-lem-' + txId)?.checked }
+  if (acao === 'gasto') body.categoria = document.getElementById('rv-cat-' + txId)?.value
+  if (acao === 'pagamento' && rvPendentes.length) {
+    const opcoes = rvPendentes.map((c, i) => `${i + 1}) ${c.descricao} · ${fmt(c.valor)} · ${dataBR(c.data)}`).join('\n')
+    const esc = prompt('Qual conta foi paga? Digite o número (ou deixe vazio para só registrar):\n\n' + opcoes)
+    if (esc === null) return
+    const c = rvPendentes[parseInt(esc) - 1]
+    if (c) body.chavePagamento = c.chave
+  }
+  try {
+    await api(`/of/transacoes/${txId}/aplicar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    document.getElementById('rv-' + txId)?.remove()
+    if (!document.querySelector('#rv-lista .rv-item')) document.getElementById('rv-lista').innerHTML = '<div class="pt-vazio">Tudo revisado 🎉</div>'
+    renderBannerRevisar(); renderLivre(); renderContasPagar()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
 }
 
 // ── START ──

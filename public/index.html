@@ -150,6 +150,9 @@
         <span class="push-convite-btn">Ativar</span>
       </div>
 
+      <!-- Movimentos do Open Finance esperando decisão -->
+      <div id="of-revisar-banner" class="of-banner" style="display:none" onclick="abrirRevisar()"></div>
+
       <!-- Quanto dá para gastar até a próxima entrada + alerta de cheque especial -->
       <div id="livre-card" class="lv-card" style="display:none"></div>
 
@@ -731,6 +734,31 @@
   </div>
 </div>
 
+<!-- ══ MODAL CONEXÕES BANCÁRIAS (Open Finance) ══ -->
+<div id="modal-conexoes" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-conexoes')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🔌 Conexões bancárias</h3>
+    <div id="of-conteudo"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-conexoes')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL PARA REVISAR (movimentos do Open Finance) ══ -->
+<div id="modal-revisar" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-revisar')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>🔎 Para revisar</h3>
+    <p class="modal-desc">Movimentos das contas que chegaram pelo Open Finance. Confirme o que cada um é — marcando "lembrar", da próxima vez o app decide sozinho.</p>
+    <div id="rv-lista"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-revisar')">Fechar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ MODAL RELATÓRIO ══ -->
 <div id="modal-relatorio" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-relatorio')">
   <div class="modal-sheet plano-sheet">
@@ -755,6 +783,18 @@
         <div>
           <div class="ferr-nome">Avisos no celular</div>
           <div class="ferr-sub">Contas vencendo e orçamento estourando</div>
+        </div>
+        <span>→</span>
+      </button>
+    </div>
+
+    <div class="ferr-secao">
+      <div class="ferr-titulo">🔌 Open Finance</div>
+      <button class="ferr-btn" onclick="fecharModal('modal-ferramentas');abrirConexoes()">
+        <span class="ferr-icon">🔌</span>
+        <div>
+          <div class="ferr-nome">Conexões bancárias</div>
+          <div class="ferr-sub">Saldos e compras chegando sozinhos (Meu Pluggy)</div>
         </div>
         <span>→</span>
       </button>

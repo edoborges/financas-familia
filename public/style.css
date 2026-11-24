@@ -1120,3 +1120,27 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .tf-rota{font-weight:700;font-size:.86rem}
 .tf-sub{font-size:.72rem;color:#64748b;margin-top:2px}
 .tf-dir{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+
+/* ═══ Open Finance ═══ */
+.of-banner{display:flex;align-items:center;gap:8px;background:#1e1b4b;color:#e0e7ff;border-radius:14px;padding:12px 14px;margin-bottom:14px;cursor:pointer;font-size:.86rem}
+.of-banner span{margin-left:auto}
+.of-item{border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:10px}
+.of-item-topo{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px}
+.of-sub{font-size:.72rem;color:#64748b;font-weight:500}
+.of-conta{border-top:1px solid #f1f5f9;padding:8px 0}
+.of-conta-nome{font-size:.84rem;font-weight:700;margin-bottom:5px}
+.of-conta-acoes{display:flex;gap:6px;align-items:center}
+.of-conta-acoes select{flex:1;padding:8px;border-radius:10px;border:1px solid #e2e8f0;font-size:.8rem}
+.of-conectar{width:100%;margin-top:6px}
+.rv-item{border:1px solid #e2e8f0;border-radius:14px;padding:11px;margin-bottom:10px}
+.rv-topo{display:flex;justify-content:space-between;gap:10px}
+.rv-info{min-width:0}
+.rv-desc{font-weight:700;font-size:.86rem;word-break:break-word}
+.rv-entra{color:#059669;white-space:nowrap}
+.rv-sai{color:#e11d48;white-space:nowrap}
+.rv-sugestao{font-size:.74rem;color:#475569;margin:6px 0}
+.rv-acoes{display:flex;flex-wrap:wrap;gap:6px}
+.rv-acoes select{padding:7px;border-radius:9px;border:1px solid #e2e8f0;font-size:.76rem}
+.rv-btn{border:1px solid #e2e8f0;background:var(--card);border-radius:9px;padding:7px 9px;font-size:.74rem;font-weight:700;cursor:pointer}
+.rv-ign{color:#64748b}
+.rv-lembrar{display:flex;gap:6px;align-items:center;font-size:.72rem;color:#64748b;margin-top:7px}

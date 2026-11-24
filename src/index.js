@@ -19,4 +19,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`)
   console.log(`📱 Abra no navegador e instale como app no celular!`)
   if (process.env.LEMBRETES !== 'off') require('./lembretes').iniciar()
+  if (process.env.LEMBRETES !== 'off') require('./openfinance').iniciar()
 })

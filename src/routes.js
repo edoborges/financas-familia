@@ -5,6 +5,7 @@ const db = require('./database')
 const { processarMensagem } = require('./processador')
 const { gerarPlanoEconomia, analisarArquivoFinanceiro } = require('./ai')
 const auth = require('./auth')
+const of = require('./openfinance')
 
 // Tudo daqui para baixo exige login (exceto as rotas públicas listadas em auth.js).
 router.use(auth.exigirLogin)
@@ -317,6 +318,75 @@ router.get('/livre-para-gastar', (req, res) => {
     const { familiaId, usuarioId } = req.query
     res.json(db.livreParaGastar(familiaId ? parseInt(familiaId) : null, usuarioId ? parseInt(usuarioId) : null))
   } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+
+// ===== OPEN FINANCE (Pluggy) =====
+// Pessoas cujos dados o pedido pode ver: a própria (visão "Só eu") ou a família.
+function pessoasDoPedido(req) {
+  const fam = req.usuario.role === 'super_admin' && req.query.familiaId ? parseInt(req.query.familiaId) : req.usuario.familia_id
+  const todos = db.ofDB.usuariosDaFamilia(fam).map(u => u.id)
+  const u = parseInt(req.query.usuarioId)
+  return u && todos.includes(u) ? [u] : todos
+}
+const daFamilia = (req, usuarioId) => req.usuario.role === 'super_admin' || db.familiaDoRegistro('usuarios', Number(usuarioId)) === Number(req.usuario.familia_id)
+
+router.get('/of/status', (req, res) => {
+  const pessoas = pessoasDoPedido(req)
+  res.json({ configurado: of.configurado(), itens: db.ofDB.itens(pessoas), contas: db.ofDB.contas(pessoas), revisar: db.ofDB.contarRevisar(pessoas) })
+})
+router.post('/of/connect-token', async (req, res) => {
+  try { res.json({ accessToken: await of.connectToken(req.usuario.id) }) }
+  catch (e) { res.status(e.status === 401 ? 502 : 500).json({ erro: e.message }) }
+})
+// Depois que o widget conecta, o app guarda o item e já busca as contas.
+router.post('/of/itens', async (req, res) => {
+  try {
+    const itemId = String(req.body.itemId || '')
+    if (!/^[0-9a-f-]{36}$/i.test(itemId)) return res.status(400).json({ erro: 'Conexão inválida' })
+    const existente = db.ofDB.item(itemId)
+    if (existente && !daFamilia(req, existente.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+    const item = await of.pluggy('/items/' + itemId)
+    db.ofDB.salvarItem(itemId, existente ? existente.usuario_id : req.usuario.id, item.connector?.name)
+    const resumo = await of.sincronizarItem(itemId)
+    res.json({ ok: true, resumo })
+  } catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/of/itens/:itemId', async (req, res) => {
+  const it = db.ofDB.item(req.params.itemId)
+  if (!it) return res.status(404).json({ erro: 'Conexão não encontrada' })
+  if (!daFamilia(req, it.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  try { await of.pluggy('/items/' + it.item_id, { method: 'DELETE' }) } catch (e) { /* segue: remove daqui de qualquer jeito */ }
+  db.ofDB.removerItem(it.item_id)
+  res.json({ ok: true })
+})
+// Liga a conta do banco a uma conta/cartão do app (ou ignora).
+router.put('/of/contas/:accountId', (req, res) => {
+  const oc = db.ofDB.conta(req.params.accountId)
+  if (!oc) return res.status(404).json({ erro: 'Conta não encontrada' })
+  if (!daFamilia(req, oc.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  const { contaId, cartaoId, ignorar, importarDesde } = req.body
+  for (const [id, tabela] of [[contaId, 'contas'], [cartaoId, 'cartoes']]) {
+    if (id && req.usuario.role !== 'super_admin' && db.familiaDoRegistro(tabela, parseInt(id)) !== Number(req.usuario.familia_id)) return res.status(403).json({ erro: 'Sem permissão' })
+  }
+  res.json(db.ofDB.vincularConta(oc.account_id, { contaId: contaId === undefined ? undefined : parseInt(contaId) || null, cartaoId: cartaoId === undefined ? undefined : parseInt(cartaoId) || null, ignorar, importarDesde }))
+})
+router.post('/of/sincronizar', async (req, res) => {
+  try { res.json(await of.sincronizarUsuarios(pessoasDoPedido(req))) }
+  catch (e) { res.status(500).json({ erro: e.message }) }
+})
+router.get('/of/revisar', (req, res) => {
+  res.json(db.ofDB.paraRevisar(pessoasDoPedido(req)))
+})
+router.post('/of/transacoes/:txId/aplicar', (req, res) => {
+  try {
+    const t = db.ofDB.tx(req.params.txId)
+    if (!t) return res.status(404).json({ erro: 'Movimento não encontrado' })
+    if (!daFamilia(req, t.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
+    const { acao, categoria, chavePagamento, tipoReceita, lembrar } = req.body
+    const feito = of.aplicar(t.tx_id, { acao, categoria, chavePagamento, tipoReceita })
+    if (lembrar && acao !== 'pagamento') db.ofDB.salvarRegra(t.usuario_id, of.chaveRegra(t.descricao.replace(/\s*\(\d+\/\d+\)$/, '')), acao, categoria || null)
+    res.json(feito)
+  } catch (e) { res.status(400).json({ erro: e.message }) }
 })
 
 // ===== TRANSFERÊNCIAS =====

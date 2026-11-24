@@ -259,6 +259,62 @@ db.exec(`
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Open Finance (Pluggy): conexões, contas do banco ligadas às do app, movimentos
+  -- importados (com a decisão tomada para cada um) e regras aprendidas.
+  CREATE TABLE IF NOT EXISTS of_itens (
+    item_id TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL,
+    banco TEXT,
+    status TEXT,
+    erro TEXT,
+    ultimo_sync DATETIME,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS of_contas (
+    account_id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL,
+    usuario_id INTEGER NOT NULL,
+    tipo TEXT,
+    subtipo TEXT,
+    nome TEXT,
+    numero TEXT,
+    saldo REAL,
+    conta_id INTEGER,
+    cartao_id INTEGER,
+    ignorar INTEGER DEFAULT 0,
+    importar_desde DATE,
+    atualizado_em DATETIME
+  );
+  CREATE TABLE IF NOT EXISTS of_transacoes (
+    tx_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    usuario_id INTEGER NOT NULL,
+    data DATE,
+    descricao TEXT,
+    valor REAL,
+    direcao TEXT,
+    categoria_pluggy TEXT,
+    contraparte TEXT,
+    metodo TEXT,
+    operacao TEXT,
+    parcela_atual INTEGER,
+    parcelas INTEGER,
+    status TEXT DEFAULT 'revisar',
+    sugestao TEXT,
+    sugestao_categoria TEXT,
+    aplicada_como TEXT,
+    gasto_id INTEGER,
+    receita_id INTEGER,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS of_regras (
+    usuario_id INTEGER NOT NULL,
+    chave TEXT NOT NULL,
+    acao TEXT NOT NULL,
+    categoria TEXT,
+    PRIMARY KEY (usuario_id, chave)
+  );
+
   -- Sessões de login. Guarda só o hash do token: quem ler o banco não consegue se passar
   -- por ninguém.
   CREATE TABLE IF NOT EXISTS sessoes (
@@ -1553,6 +1609,77 @@ function livreParaGastar(familiaId = null, usuarioId = null) {
   }
 }
 
+// ===== OPEN FINANCE (dados; a conversa com a Pluggy fica em openfinance.js) =====
+const ofDB = {
+  itens: (usuarioIds) => usuarioIds.length
+    ? db.prepare(`SELECT i.*, u.nome AS usuario_nome FROM of_itens i JOIN usuarios u ON u.id = i.usuario_id WHERE i.usuario_id IN (${usuarioIds.map(() => '?').join(',')}) ORDER BY i.criado_em`).all(...usuarioIds)
+    : [],
+  todosItens: () => db.prepare('SELECT * FROM of_itens').all(),
+  item: (itemId) => db.prepare('SELECT * FROM of_itens WHERE item_id = ?').get(itemId),
+  salvarItem: (itemId, usuarioId, banco) => db.prepare(`INSERT INTO of_itens (item_id, usuario_id, banco) VALUES (?, ?, ?)
+    ON CONFLICT(item_id) DO UPDATE SET banco = COALESCE(excluded.banco, banco)`).run(itemId, usuarioId, banco || null),
+  statusItem: (itemId, status, erro) => db.prepare("UPDATE of_itens SET status = ?, erro = ?, ultimo_sync = CASE WHEN ? IS NULL THEN CURRENT_TIMESTAMP ELSE ultimo_sync END WHERE item_id = ?").run(status, erro || null, erro || null, itemId),
+  removerItem: (itemId) => {
+    db.prepare("DELETE FROM of_transacoes WHERE status = 'revisar' AND account_id IN (SELECT account_id FROM of_contas WHERE item_id = ?)").run(itemId)
+    db.prepare('DELETE FROM of_contas WHERE item_id = ?').run(itemId)
+    db.prepare('DELETE FROM of_itens WHERE item_id = ?').run(itemId)
+  },
+  contas: (usuarioIds) => usuarioIds.length
+    ? db.prepare(`SELECT oc.*, c.nome AS conta_nome, ca.nome AS cartao_nome FROM of_contas oc LEFT JOIN contas c ON c.id = oc.conta_id LEFT JOIN cartoes ca ON ca.id = oc.cartao_id
+      WHERE oc.usuario_id IN (${usuarioIds.map(() => '?').join(',')}) ORDER BY oc.tipo, oc.nome`).all(...usuarioIds)
+    : [],
+  contasDoItem: (itemId) => db.prepare('SELECT * FROM of_contas WHERE item_id = ?').all(itemId),
+  conta: (accountId) => db.prepare('SELECT * FROM of_contas WHERE account_id = ?').get(accountId),
+  salvarConta: (a) => db.prepare(`INSERT INTO of_contas (account_id, item_id, usuario_id, tipo, subtipo, nome, numero, saldo, importar_desde, atualizado_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(account_id) DO UPDATE SET tipo = excluded.tipo, subtipo = excluded.subtipo, nome = excluded.nome, numero = excluded.numero, saldo = excluded.saldo, atualizado_em = CURRENT_TIMESTAMP`)
+    .run(a.accountId, a.itemId, a.usuarioId, a.tipo, a.subtipo, a.nome, a.numero, a.saldo, hojeBR()),
+  vincularConta: (accountId, { contaId, cartaoId, ignorar, importarDesde }) => {
+    const atual = db.prepare('SELECT * FROM of_contas WHERE account_id = ?').get(accountId)
+    if (!atual) return null
+    db.prepare('UPDATE of_contas SET conta_id = ?, cartao_id = ?, ignorar = ?, importar_desde = ? WHERE account_id = ?').run(
+      contaId === undefined ? atual.conta_id : (contaId || null),
+      cartaoId === undefined ? atual.cartao_id : (cartaoId || null),
+      ignorar === undefined ? atual.ignorar : (ignorar ? 1 : 0),
+      /^\d{4}-\d{2}-\d{2}$/.test(importarDesde || '') ? importarDesde : atual.importar_desde,
+      accountId)
+    return db.prepare('SELECT * FROM of_contas WHERE account_id = ?').get(accountId)
+  },
+  atualizarSaldoConta: (contaId, saldo, limite) => {
+    db.prepare('UPDATE contas SET saldo = ? WHERE id = ?').run(saldo, contaId)
+    if (limite > 0) db.prepare('UPDATE contas SET limite = ? WHERE id = ? AND COALESCE(limite, 0) = 0').run(limite, contaId)
+  },
+  existeTx: (txId) => !!db.prepare('SELECT 1 FROM of_transacoes WHERE tx_id = ?').get(txId),
+  inserirTx: (t) => db.prepare(`INSERT OR IGNORE INTO of_transacoes (tx_id, account_id, usuario_id, data, descricao, valor, direcao, categoria_pluggy, contraparte, metodo, operacao, parcela_atual, parcelas, status, sugestao, sugestao_categoria)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(t.txId, t.accountId, t.usuarioId, t.data, t.descricao, t.valor, t.direcao, t.categoriaPluggy || null, t.contraparte || null,
+      t.metodo || null, t.operacao || null, t.parcelaAtual || null, t.parcelas || null, t.status || 'revisar', t.sugestao || null, t.sugestaoCategoria || null),
+  tx: (txId) => db.prepare('SELECT t.*, oc.tipo AS conta_tipo, oc.conta_id, oc.cartao_id, oc.nome AS conta_banco FROM of_transacoes t JOIN of_contas oc ON oc.account_id = t.account_id WHERE t.tx_id = ?').get(txId),
+  marcarTx: (txId, campos) => db.prepare('UPDATE of_transacoes SET status = ?, aplicada_como = ?, gasto_id = ?, receita_id = ? WHERE tx_id = ?')
+    .run(campos.status, campos.aplicadaComo || null, campos.gastoId || null, campos.receitaId || null, txId),
+  paraRevisar: (usuarioIds) => usuarioIds.length
+    ? db.prepare(`SELECT t.*, oc.tipo AS conta_tipo, oc.nome AS conta_banco, u.nome AS usuario_nome FROM of_transacoes t JOIN of_contas oc ON oc.account_id = t.account_id JOIN usuarios u ON u.id = t.usuario_id
+      WHERE t.status = 'revisar' AND t.usuario_id IN (${usuarioIds.map(() => '?').join(',')}) ORDER BY t.data DESC, t.criado_em DESC LIMIT 200`).all(...usuarioIds)
+    : [],
+  contarRevisar: (usuarioIds) => usuarioIds.length
+    ? db.prepare(`SELECT COUNT(*) n FROM of_transacoes WHERE status = 'revisar' AND usuario_id IN (${usuarioIds.map(() => '?').join(',')})`).get(...usuarioIds).n
+    : 0,
+  regra: (usuarioId, chave) => db.prepare('SELECT * FROM of_regras WHERE usuario_id = ? AND chave = ?').get(usuarioId, chave),
+  salvarRegra: (usuarioId, chave, acao, categoria) => db.prepare(`INSERT INTO of_regras (usuario_id, chave, acao, categoria) VALUES (?, ?, ?, ?)
+    ON CONFLICT(usuario_id, chave) DO UPDATE SET acao = excluded.acao, categoria = excluded.categoria`).run(usuarioId, chave, acao, categoria || null),
+  // Gasto já gerado por um gasto fixo no mesmo mês, com valor parecido: o movimento do banco
+  // é esse mesmo gasto, então atualiza em vez de duplicar.
+  gastoFixoParecido: (usuarioId, data, valor) => db.prepare(`SELECT * FROM gastos WHERE usuario_id = ? AND recorrente_id IS NOT NULL AND origem = 'recorrente'
+    AND strftime('%Y-%m', data_gasto) = ? AND ABS(valor - ?) <= ? * 0.15 AND ABS(julianday(data_gasto) - julianday(?)) <= 10 ORDER BY ABS(valor - ?) LIMIT 1`)
+    .get(usuarioId, String(data).slice(0, 7), valor, valor, data, valor),
+  confirmarGastoFixo: (gastoId, valor, data, descricao) => db.prepare("UPDATE gastos SET valor = ?, data_gasto = ?, origem = 'openfinance', descricao = COALESCE(?, descricao) WHERE id = ?").run(valor, data, descricao || null, gastoId),
+  inserirGasto: (g) => Number(db.prepare(`INSERT INTO gastos (usuario_id, cartao_id, conta_id, descricao, valor, categoria, forma_pagamento, data_gasto, parcelas, parcela_atual, origem)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openfinance')`).run(g.usuarioId, g.cartaoId || null, g.contaId || null, g.descricao, g.valor, g.categoria || 'Outros',
+      g.formaPagamento || (g.cartaoId ? 'credito' : 'debito'), g.data, g.parcelas || 1, g.parcelaAtual || 1).lastInsertRowid),
+  gastoIgual: (usuarioId, cartaoId, data, valor) => !!db.prepare('SELECT 1 FROM gastos WHERE usuario_id = ? AND COALESCE(cartao_id, 0) = ? AND date(data_gasto) = ? AND ROUND(valor, 2) = ROUND(?, 2)')
+    .get(usuarioId, cartaoId || 0, data, valor),
+  usuariosDaFamilia: (familiaId) => db.prepare('SELECT id, nome FROM usuarios WHERE familia_id = ?').all(familiaId)
+}
+
 // Cópia consistente do banco inteiro num arquivo temporário (funciona com o app rodando).
 function gerarBackup() {
   const arq = path.join(require('os').tmpdir(), `financeiro-backup-${Date.now()}.db`)
@@ -1579,7 +1706,7 @@ function zerarNumerosFamilia(familiaId) {
     ]
     r.pagamentos = db.prepare(`DELETE FROM pagamentos WHERE usuario_id IN ${em}`).run(...ids).changes
     for (const c of chaves) r.pagamentos += db.prepare('DELETE FROM pagamentos WHERE chave LIKE ?').run(c).changes
-    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias']) {
+    for (const t of ['gastos', 'receitas', 'emprestimos', 'receitas_programadas', 'gastos_recorrentes', 'orcamentos', 'importacoes', 'notificacoes_enviadas', 'recebiveis', 'patrimonio', 'patrimonio_historico', 'fatura_creditos', 'transferencias', 'of_transacoes']) {
       r[t] = db.prepare(`DELETE FROM ${t} WHERE usuario_id IN ${em}`).run(...ids).changes
     }
     r.metas = db.prepare('DELETE FROM metas WHERE familia_id = ?').run(familiaId).changes
@@ -1596,6 +1723,7 @@ function zerarNumerosFamilia(familiaId) {
 }
 
 module.exports = {
+  ofDB,
   registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
   listarRecebiveis, criarRecebiveis, editarRecebivel, marcarRecebido, desfazerRecebido, deletarRecebivel, recebiveisAtrasados,
