@@ -434,11 +434,11 @@ router.put('/of/contas/:accountId', (req, res) => {
   const oc = db.ofDB.conta(req.params.accountId)
   if (!oc) return res.status(404).json({ erro: 'Conta não encontrada' })
   if (!daFamilia(req, oc.usuario_id)) return res.status(403).json({ erro: 'Sem permissão' })
-  const { contaId, cartaoId, ignorar, importarDesde } = req.body
+  const { contaId, cartaoId, ignorar, importarDesde, entradasAuto } = req.body
   for (const [id, tabela] of [[contaId, 'contas'], [cartaoId, 'cartoes']]) {
     if (id && req.usuario.role !== 'super_admin' && db.familiaDoRegistro(tabela, parseInt(id)) !== Number(req.usuario.familia_id)) return res.status(403).json({ erro: 'Sem permissão' })
   }
-  res.json(db.ofDB.vincularConta(oc.account_id, { contaId: contaId === undefined ? undefined : parseInt(contaId) || null, cartaoId: cartaoId === undefined ? undefined : parseInt(cartaoId) || null, ignorar, importarDesde }))
+  res.json(db.ofDB.vincularConta(oc.account_id, { contaId: contaId === undefined ? undefined : parseInt(contaId) || null, cartaoId: cartaoId === undefined ? undefined : parseInt(cartaoId) || null, ignorar, importarDesde, entradasAuto }))
 })
 // Prévia dos movimentos de uma conta do banco, sem importar nada (para conferir antes de ligar).
 router.get('/of/contas/:accountId/previa', async (req, res) => {

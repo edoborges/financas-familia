@@ -220,6 +220,11 @@ async function sincronizarItem(itemId) {
             : { sugestao: 'ignorar' } // estorno: o usuário decide
         } else {
           decisao = sugerir(base, nomesFamilia)
+          // Conta marcada para isso (ex.: PJ do consultório): entrada que não é transferência
+          // própria vira receita daquele tipo, sem passar pela revisão.
+          if (oc.entradas_auto && direcao === 'entrada' && decisao.sugestao === 'receita') {
+            decisao = { sugestao: 'receita', sugestaoCategoria: oc.entradas_auto, auto: true }
+          }
         }
         const regra = db.ofDB.regra(item.usuario_id, chaveRegra(tx.description))
         if (regra) decisao = { sugestao: regra.acao, sugestaoCategoria: regra.categoria || decisao.sugestaoCategoria }
@@ -230,11 +235,11 @@ async function sincronizarItem(itemId) {
         const igual = ehCartao && direcao === 'saida' ? db.ofDB.gastoMesmaFatura(item.usuario_id, oc.cartao_id, base.data, valor) : null
         const duplicada = !!igual
         // Automático: compra no cartão, ou qualquer movimento que já tem regra aprendida.
-        const automatico = !duplicada && ((ehCartao && direcao === 'saida') || (regra && regra.acao !== 'pagamento'))
+        const automatico = !duplicada && ((ehCartao && direcao === 'saida') || (regra && regra.acao !== 'pagamento') || decisao.auto)
         if (duplicada) {
           db.ofDB.marcarTx(tx.id, { status: 'ignorada', aplicadaComo: 'duplicada', gastoId: igual.id })
         } else if (automatico) {
-          aplicar(tx.id, { acao: decisao.sugestao, categoria: decisao.sugestaoCategoria })
+          aplicar(tx.id, { acao: decisao.sugestao, categoria: decisao.sugestaoCategoria, tipoReceita: decisao.sugestao === 'receita' ? decisao.sugestaoCategoria : undefined })
           resumo.automaticos++
         } else {
           resumo.revisar++

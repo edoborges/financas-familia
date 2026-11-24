@@ -369,6 +369,8 @@ try { db.exec("ALTER TABLE emprestimos ADD COLUMN desconto_folha INTEGER DEFAULT
 // "Paguei" pode descontar de uma conta: guarda de qual e quanto, para o desfazer devolver.
 try { db.exec("ALTER TABLE pagamentos ADD COLUMN conta_id INTEGER") } catch(e) {}
 try { db.exec("ALTER TABLE pagamentos ADD COLUMN valor REAL") } catch(e) {}
+// Conta do Open Finance cujas entradas viram receita sozinhas (ex.: conta PJ → atendimento).
+try { db.exec("ALTER TABLE of_contas ADD COLUMN entradas_auto TEXT") } catch(e) {}
 // Limite do cheque especial da conta (para o alerta de estouro).
 try { db.exec("ALTER TABLE contas ADD COLUMN limite REAL DEFAULT 0") } catch(e) {}
 
@@ -1722,9 +1724,10 @@ const ofDB = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(account_id) DO UPDATE SET tipo = excluded.tipo, subtipo = excluded.subtipo, nome = excluded.nome, numero = excluded.numero, saldo = excluded.saldo, atualizado_em = CURRENT_TIMESTAMP`)
     .run(a.accountId, a.itemId, a.usuarioId, a.tipo, a.subtipo, a.nome, a.numero, a.saldo, hojeBR()),
-  vincularConta: (accountId, { contaId, cartaoId, ignorar, importarDesde }) => {
+  vincularConta: (accountId, { contaId, cartaoId, ignorar, importarDesde, entradasAuto }) => {
     const atual = db.prepare('SELECT * FROM of_contas WHERE account_id = ?').get(accountId)
     if (!atual) return null
+    if (entradasAuto !== undefined) db.prepare('UPDATE of_contas SET entradas_auto = ? WHERE account_id = ?').run(['atendimento', 'salario', 'outro'].includes(entradasAuto) ? entradasAuto : null, accountId)
     db.prepare('UPDATE of_contas SET conta_id = ?, cartao_id = ?, ignorar = ?, importar_desde = ? WHERE account_id = ?').run(
       contaId === undefined ? atual.conta_id : (contaId || null),
       cartaoId === undefined ? atual.cartao_id : (cartaoId || null),
