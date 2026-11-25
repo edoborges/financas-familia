@@ -4071,7 +4071,8 @@ async function renderInvestResumo() {
       <div><span>Selic</span><b>${String(i.selic).replace('.', ',')}%</b></div>
       <div><span>CDI</span><b>${String(i.cdi).replace('.', ',')}%</b></div>
       <div><span>IPCA 12m</span><b>${String(i.ipca12m).replace('.', ',')}%</b></div>
-      <div><span>Ibovespa</span><b class="${(i.ibov?.variacaoDia || 0) >= 0 ? 'iv-up' : 'iv-down'}">${i.ibov ? pct(i.ibov.variacaoDia) : '—'}</b></div>`
+      <div><span>Ibovespa</span><b class="${(i.ibov?.variacaoDia || 0) >= 0 ? 'iv-up' : 'iv-down'}">${i.ibov ? pct(i.ibov.variacaoDia) : '—'}</b></div>
+      <div><span>Dólar</span><b>${i.dolar ? i.dolar.valor.toFixed(2).replace('.', ',') : '—'}</b></div>`
   } catch (e) { el.innerHTML = '<div class="of-sub">Indicadores indisponíveis agora.</div>' }
 }
 
@@ -4159,8 +4160,12 @@ async function renderIvIndicadores() {
         <div class="iv-card"><span>Juro real (CDI − inflação)</span><b>${pct(real)}</b><small>Quanto o CDI ganha da inflação, em 12 meses.</small></div>
         <div class="iv-card"><span>Ibovespa</span><b>${i.ibov ? Math.round(i.ibov.pontos).toLocaleString('pt-BR') + ' pts' : '—'}</b>
           <small>Hoje ${i.ibov ? pct(i.ibov.variacaoDia) : '—'} · 12 meses ${i.ibov ? pct(i.ibov.variacao12m) : '—'}</small></div>
+        <div class="iv-card"><span>Dólar comercial</span><b>${i.dolar ? fmt(i.dolar.valor) : '—'}</b>
+          <small>${!i.dolar ? 'Cotação indisponível agora.'
+            : i.dolar.fonte === 'ptax' ? `PTAX do Banco Central, ref. ${i.dolar.ref}${i.dolar.variacaoDia != null ? ' · ' + pct(i.dolar.variacaoDia) + ' no dia' : ''}.`
+            : `Hoje ${pct(i.dolar.variacaoDia)} · 12 meses ${pct(i.dolar.variacao12m)}. Quanto custa 1 US$ em reais.`}</small></div>
       </div>
-      <p class="of-sub">Fontes: Banco Central (SGS) e B3 via Yahoo Finance. Atualiza a cada poucas horas.</p>`
+      <p class="of-sub">Fontes: Banco Central (SGS), B3 e câmbio via Yahoo Finance. Juros e inflação atualizam a cada poucas horas; bolsa e dólar, a cada 15 minutos.</p>`
   } catch (e) { el.innerHTML = `<div class="pt-vazio">Não foi possível buscar os indicadores: ${escH(e.message)}</div>` }
 }
 
@@ -4404,6 +4409,8 @@ const OP_CATALOGO = [
     'Retorno rápido quando o ponto tem fluxo.', 'Aluguel e taxas de shopping pesam; depende de funcionário e de você presente.'],
   ['lavarapido', 'fisico', 'Lava-rápido ou estética automotiva', 'Lavagem, higienização e polimento; dá para começar pequeno.', 30000, 150000, '15% a 25%', 'Média a alta', 3,
     'Serviço recorrente, com procura o ano todo.', 'Licença ambiental para água, funcionários e ponto com estacionamento.'],
+  ['carros', 'fisico', 'Compra e venda de carros usados', 'Comprar abaixo da tabela FIPE, ajustar o que precisa e revender. Dá para começar com um carro de cada vez.', 30000, 80000, '5% a 15% por carro', 'Média a alta (anunciar, mostrar, negociar)', 4,
+    'Começa sem loja; você vê o resultado de cada carro em 1 a 3 meses.', 'Dinheiro parado enquanto o carro não vende; vício oculto, multa ou débito no nome anterior; vistoria, transferência e IPVA comem a margem. Várias revendas por ano pedem CNPJ.'],
   ['marketplace', 'ecommerce', 'Revenda em marketplace', 'Comprar de fornecedor e vender no Mercado Livre, Shopee ou Amazon.', 5000, 40000, '5% a 15%', 'Média a alta', 3,
     'Começa sem loja física e com estoque pequeno.', 'Taxas do marketplace (10% a 20%), frete, devoluções e guerra de preço.'],
   ['marca', 'ecommerce', 'Marca própria em loja online', 'Um produto de nicho com marca sua, loja própria e redes sociais.', 15000, 80000, '10% a 25%', 'Alta', 4,

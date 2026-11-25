@@ -1146,7 +1146,7 @@ select:focus { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,24
 .rv-lembrar{display:flex;gap:6px;align-items:center;font-size:.72rem;color:#64748b;margin-top:7px}
 
 /* ═══ Investimentos ═══ */
-.iv-resumo{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--shadow);margin-bottom:16px;cursor:pointer}
+.iv-resumo{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;background:var(--card);border-radius:14px;padding:10px;box-shadow:var(--shadow);margin-bottom:16px;cursor:pointer}
 .iv-resumo div{display:flex;flex-direction:column;align-items:center;gap:2px}
 .iv-resumo span{font-size:.64rem;color:#64748b;font-weight:700;text-transform:uppercase}
 .iv-resumo b{font-size:.86rem}

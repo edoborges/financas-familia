@@ -1,4 +1,4 @@
-const CACHE = 'financeiro-v3'
+const CACHE = 'financeiro-v4'
 const ASSETS = ['/', '/style.css', '/visual.css', '/icones.js', '/app.js', '/manifest.json']
 
 self.addEventListener('install', e => {

@@ -60,17 +60,36 @@ async function cotacao(ticker) {
   })
 }
 
+// Dólar comercial (USD → BRL): cotação do mercado pelo Yahoo; se cair, usa a PTAX do
+// Banco Central (série 1, fechamento do dia útil anterior).
+async function dolar() {
+  try {
+    const c = await cotacao('BRL=X')
+    return { valor: c.preco, variacaoDia: c.variacaoDia, variacao12m: c.variacao12m, fonte: 'mercado', atualizadoEm: c.atualizadoEm }
+  } catch (e) {
+    const ptax = await emCache('ptax', HORA, () => bcb(1, 2))
+    const [ant, ult] = ptax.length > 1 ? ptax : [null, ptax[0]]
+    const valor = numBR(ult.valor)
+    return { valor, variacaoDia: ant ? (valor / numBR(ant.valor) - 1) * 100 : null, variacao12m: null, fonte: 'ptax', ref: ult.data }
+  }
+}
+
 async function indicadores() {
-  return emCache('indicadores', 6 * HORA, async () => {
+  // Juros e inflação mudam devagar (cache de 6 h); bolsa e dólar vêm da cotação (cache de 15 min).
+  const base = await emCache('indicadores', 6 * HORA, async () => {
     const [selic, cdi, ipca] = await Promise.all([bcb(432), bcb(4389), bcb(13522)])
-    let ibov = null
-    try { ibov = await cotacao('^BVSP') } catch (e) { /* bolsa fora do ar não derruba os indicadores */ }
     return {
       selic: numBR(selic[0].valor), cdi: numBR(cdi[0].valor), ipca12m: numBR(ipca[0].valor),
-      ipcaRef: ipca[0].data, cdiRef: cdi[0].data,
-      ibov: ibov ? { pontos: ibov.preco, variacaoDia: ibov.variacaoDia, variacao12m: ibov.variacao12m } : null
+      ipcaRef: ipca[0].data, cdiRef: cdi[0].data
     }
   })
+  // Bolsa ou câmbio fora do ar não derrubam os indicadores.
+  const [ibov, usd] = await Promise.all([cotacao('^BVSP').catch(() => null), dolar().catch(() => null)])
+  return {
+    ...base,
+    ibov: ibov ? { pontos: ibov.preco, variacaoDia: ibov.variacaoDia, variacao12m: ibov.variacao12m } : null,
+    dolar: usd
+  }
 }
 
 // CDI acumulado desde uma data (fator multiplicativo), a partir da série diária oficial (12).
