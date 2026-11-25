@@ -2091,7 +2091,9 @@ async function abrirPlano() {
   `
   try {
     const { plano } = await api('/plano' + famQ())
-    document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">${plano}</div>`
+    // Texto da IA: escapa e só deixa o **negrito** virar <b>.
+    const html = escH(plano).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>')
+    document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">${html}</div>`
   } catch {
     document.getElementById('plano-conteudo').innerHTML = `<div class="plano-texto">❌ Erro ao gerar plano. Tente novamente.</div>`
   }

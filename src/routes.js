@@ -1032,10 +1032,17 @@ router.get('/exportar/dados', (req, res) => {
 })
 
 router.get('/plano', async (req, res) => {
-  const { familiaId } = req.query
-  const resumo = db.resumoFinanceiro(familiaId ? parseInt(familiaId) : null)
-  const plano = await gerarPlanoEconomia(resumo)
-  res.json({ plano })
+  const { familiaId, usuarioId } = req.query
+  try {
+    const fam = familiaId ? parseInt(familiaId) : null
+    const usu = usuarioId ? parseInt(usuarioId) : null
+    const resumo = db.resumoFinanceiro(fam, usu)
+    resumo.recorrentes = db.listarRecorrentes(fam, usu)
+    const plano = await gerarPlanoEconomia(resumo)
+    res.json({ plano })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
 })
 
 // ── ORÇAMENTOS POR CATEGORIA ──

@@ -117,48 +117,87 @@ Regras:
 }
 
 async function gerarPlanoEconomia(dados) {
-  const { salarioTotal, rendaTotal, gastosMes, metas, cartoes, categorias } = dados
+  const { salarioTotal, rendaTotal, gastosMes, metas = [], cartoes = [], categorias = [],
+    emprestimos = [], totalEmDividas = 0, saldoContas = 0, recorrentes = [] } = dados
   // Renda real do mês (programadas + lançadas). salarioTotal é o campo legado do cadastro,
   // quase sempre zerado — com ele o plano partia de "renda R$0".
   const renda = Number(rendaTotal ?? salarioTotal) || 0
+  const R = v => 'R$' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const hoje = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  const diasMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
 
   const metasTexto = metas.map(m =>
-    `- ${m.nome}: meta R$${m.valor_alvo}, economizado R$${m.valor_atual}${m.prazo ? `, prazo ${m.prazo}` : ''}`
+    `- ${m.nome}: meta ${R(m.valor_alvo)}, guardado ${R(m.valor_atual)}${m.prazo ? `, prazo ${m.prazo}` : ''}`
   ).join('\n') || 'Nenhuma meta cadastrada'
 
   const categoriasTexto = categorias.map(c =>
-    `- ${c.categoria}: R$${c.total.toFixed(2)} (${c.quantidade}x)`
+    `- ${c.categoria}: ${R(c.total)} (${c.quantidade} lançamentos)`
   ).join('\n') || 'Sem gastos registrados'
 
-  const prompt = `Você é um consultor financeiro pessoal. Analise os dados financeiros do casal e crie um plano de economia personalizado.
+  const ativas = emprestimos.filter(e => e.status !== 'quitado' && Number(e.valor_total) > Number(e.valor_pago))
+  const dividasTexto = ativas.map(e => {
+    const resta = Number(e.valor_total) - Number(e.valor_pago)
+    const juros = Number(e.taxa_juros) > 0 ? `, juros ${String(e.taxa_juros).replace('.', ',')}% ao mês` : ', juros não informados'
+    const parc = Number(e.parcela_mensal) > 0 ? `parcela ${R(e.parcela_mensal)} (${e.parcelas_pagas || 0}/${e.total_parcelas} pagas)` : 'sem parcela fixa'
+    return `- ${e.descricao} (${e.credor}): ${parc}, falta ${R(resta)}${juros}${e.desconto_folha ? ', DESCONTADO NA FOLHA (já sai antes do salário cair)' : ''}`
+  }).join('\n') || 'Nenhuma dívida cadastrada'
+  const parcelasMes = ativas.reduce((a, e) => a + Number(e.parcela_mensal || 0), 0)
+  const parcelasFolha = ativas.filter(e => e.desconto_folha).reduce((a, e) => a + Number(e.parcela_mensal || 0), 0)
 
-DADOS FINANCEIROS:
-- Renda total do casal: R$${renda.toFixed(2)}/mês
-- Total gasto este mês: R$${gastosMes.toFixed(2)}
-- Saldo disponível: R$${(renda - gastosMes).toFixed(2)}
+  const cartoesTexto = cartoes.map(c =>
+    `- ${c.nome}: próxima fatura ${R(c.gasto_atual)}${c.proxima_fatura ? ` vence ${c.proxima_fatura.data}` : ''}, limite usado ${R(c.limite_usado)} de ${R(c.limite)}`
+  ).join('\n') || 'Nenhum cartão'
+  const totalFaturas = cartoes.reduce((a, c) => a + Number(c.gasto_atual || 0), 0)
 
-GASTOS POR CATEGORIA ESTE MÊS:
+  const fixas = recorrentes.filter(r => r.ativa)
+  const fixasTexto = fixas.map(r => `- ${r.descricao} (${r.categoria}): ${R(r.valor)} todo dia ${r.dia_mes}${r.forma_pagamento === 'credito' ? ', no cartão' : ''}`).join('\n') || 'Nenhuma conta fixa cadastrada'
+
+  const prompt = `Você é o assistente do app de finanças do casal (o próprio app onde eles lançam tudo). Faça um plano de organização do mês com os dados abaixo.
+
+HOJE: dia ${hoje.getDate()} de ${diasMes}. Os gastos do mês ainda não estão completos.
+
+RENDA DO MÊS: ${R(renda)} (já líquida: o que é descontado na folha não entra aqui)
+GASTOS LANÇADOS ATÉ HOJE: ${R(gastosMes)}
+SALDO HOJE NAS CONTAS: ${R(saldoContas)}
+
+GASTOS POR CATEGORIA (lançados até hoje):
 ${categoriasTexto}
 
-METAS DO CASAL:
+CONTAS FIXAS DO MÊS:
+${fixasTexto}
+
+CARTÕES:
+${cartoesTexto}
+Total das próximas faturas: ${R(totalFaturas)}
+
+DÍVIDAS (total restante ${R(totalEmDividas)}; parcelas somam ${R(parcelasMes)}/mês, das quais ${R(parcelasFolha)} descontadas na folha):
+${dividasTexto}
+
+METAS:
 ${metasTexto}
 
-Crie um plano financeiro prático com:
-1. Análise dos gastos atuais (pontos de atenção)
-2. Sugestão de orçamento mensal por categoria
-3. Quanto poupar por mês para cada meta
-4. Dicas de economia específicas para o perfil deles
-5. Prazo estimado para atingir cada meta
+Escreva:
+1. Onde o dinheiro está indo, com os números acima. Se "Outros" for uma categoria grande na lista, diga que costuma ser lançamento sem categoria e que dá para corrigir na revisão de movimentos do próprio app.
+2. O peso das dívidas e das faturas no orçamento. Não ignore as dívidas: elas são parte central do plano.
+3. Sugestão de teto por categoria para o próximo mês, só onde houver dado.
+4. Para as metas, um prazo realista considerando as parcelas e faturas que já estão comprometidas.
+5. Três a cinco atitudes práticas para este mês.
 
-Seja direto, use números reais e emojis. Máximo 500 palavras.`
+Regras:
+- Use só os números acima. Não invente valores nem quantidades.
+- Não indique outros aplicativos: tudo se faz neste app. Não prometa funções do app que não estejam citadas aqui (lançar gastos, revisar movimentos, cadastrar metas e dívidas).
+- Não indique produtos financeiros, bancos ou investimentos específicos. Se o assunto for onde aplicar ou como renegociar, diga que vale conversar com um planejador financeiro certificado (CFP).
+- Texto simples para tela de celular: sem tabelas, sem markdown de títulos (#). Títulos em uma linha com **negrito**. Pode usar poucos emojis.
+- No máximo 450 palavras e termine o texto (não corte no meio).`
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1000,
+    max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }]
   })
 
-  return response.content[0].text
+  return response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
 }
 
 async function analisarArquivoFinanceiro(base64Data, mediaType, nomeArquivo = '') {
