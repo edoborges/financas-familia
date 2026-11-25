@@ -180,6 +180,7 @@
 
       <!-- Movimentos do Open Finance esperando decisão -->
       <div id="of-revisar-banner" class="of-banner" style="display:none" onclick="abrirRevisar()"></div>
+      <div id="outros-banner" class="of-banner" style="display:none" onclick="abrirOutros()"></div>
 
       <!-- Quanto dá para gastar até a próxima entrada + alerta de cheque especial -->
       <div id="livre-card" class="lv-card" style="display:none"></div>
@@ -818,6 +819,33 @@
     <div id="rv-lista"></div>
     <div class="modal-btns">
       <button class="btn-cancel" onclick="fecharModal('modal-revisar')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Categoria de um lançamento -->
+<div id="modal-catgasto" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-catgasto')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>Categoria</h3>
+    <div id="cg-info" class="cg-info"></div>
+    <div id="cg-grade" class="cg-grade"></div>
+    <label class="cg-iguais"><input type="checkbox" id="cg-iguais" checked> Mudar também os lançamentos com a mesma descrição e lembrar para os próximos</label>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-catgasto')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lançamentos do mês em "Outros" -->
+<div id="modal-outros" class="modal-overlay" style="display:none" onclick="if(event.target===this)fecharModal('modal-outros')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <h3>Organizar "Outros"</h3>
+    <p class="modal-desc">Lançamentos deste mês sem categoria. Toque em cada um para escolher a categoria certa.</p>
+    <div id="outros-lista"></div>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="fecharModal('modal-outros')">Fechar</button>
     </div>
   </div>
 </div>

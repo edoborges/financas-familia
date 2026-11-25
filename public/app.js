@@ -455,6 +455,7 @@ async function carregarInicio() {
     renderContasPagar()
     renderLivre()
     renderBannerRevisar()
+    renderBannerOutros()
 
     // Patrimônio líquido
     renderPatrimonio(resumo)
@@ -828,14 +829,16 @@ function renderContasRow(contas) {
   }).join('') + `<div class="conta-vazia" onclick="abrirModalConta()"><span>＋</span> Nova conta</div>`
 }
 
+const _gastosVistos = new Map()
 function txItemHTML(g) {
+  _gastosVistos.set(g.id, g)
   const data = new Date(g.data_gasto+'T00:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short'})
   const cartao = g.cartao_nome ? ` · ${g.cartao_nome}` : ''
   const origemClass = g.origem === 'importado' ? ' tx-importado' : g.origem === 'recorrente' ? ' tx-recorrente' : ''
   return `
     <div class="tx-item${origemClass}" id="tx-${g.id}">
-      <div class="tx-emoji" style="--c:${corCat(g.categoria)}">${EMOJI_CAT[g.categoria]||'📦'}</div>
-      <div class="tx-info">
+      <div class="tx-emoji" style="--c:${corCat(g.categoria)}" onclick="abrirCategoriaGasto(${g.id})">${EMOJI_CAT[g.categoria]||'📦'}</div>
+      <div class="tx-info" onclick="abrirCategoriaGasto(${g.id})">
         <div class="tx-desc">${g.descricao}</div>
         <div class="tx-meta">${g.usuario_nome} · ${data}${cartao}</div>
       </div>
@@ -867,6 +870,72 @@ async function excluirGasto(id) {
   } catch(e) {
     toast('❌ ' + e.message, 'erro')
   }
+}
+
+// ── CATEGORIA DE UM LANÇAMENTO ──
+// Lista de categorias: CATS_GASTO (definida junto da revisão do Open Finance).
+let catGastoAtual = null
+
+function abrirCategoriaGasto(id) {
+  const g = _gastosVistos.get(id)
+  if (!g) return
+  catGastoAtual = g
+  const data = new Date(g.data_gasto + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+  document.getElementById('cg-info').innerHTML = `<b>${escH(g.descricao)}</b><span>${fmt(g.valor)} · ${data}${g.cartao_nome ? ' · ' + escH(g.cartao_nome) : ''}</span>`
+  document.getElementById('cg-grade').innerHTML = CATS_GASTO.map(c => `
+    <button class="cg-cat${c === g.categoria ? ' on' : ''}" style="--c:${corCat(c)}" onclick="salvarCategoriaGasto('${c}')">
+      <span class="cg-ic">${EMOJI_CAT[c] || '📦'}</span>${c}
+    </button>`).join('')
+  document.getElementById('cg-iguais').checked = true
+  document.getElementById('modal-catgasto').style.display = 'flex'
+}
+
+async function salvarCategoriaGasto(categoria) {
+  const g = catGastoAtual
+  if (!g) return
+  const iguais = document.getElementById('cg-iguais').checked
+  try {
+    const r = await api(`/gastos/${g.id}/categoria`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ categoria, iguais })
+    })
+    fecharModal('modal-catgasto')
+    toast(r.alterados > 1 ? `✅ ${r.alterados} lançamentos agora em ${categoria}` : `✅ Agora em ${categoria}`)
+    for (const v of _gastosVistos.values()) if (v.id === g.id) v.categoria = categoria
+    if (document.getElementById('modal-outros').style.display === 'flex') renderListaOutros()
+    carregarInicio()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// Lançamentos do mês em "Outros": aviso no Início e lista para organizar.
+async function gastosOutrosMes() {
+  const lista = await api('/gastos' + famQ())
+  return lista.filter(g => (g.categoria || 'Outros') === 'Outros')
+}
+async function renderBannerOutros() {
+  const el = document.getElementById('outros-banner')
+  if (!el) return
+  try {
+    const outros = await gastosOutrosMes()
+    if (!outros.length) { el.style.display = 'none'; return }
+    const total = outros.reduce((a, g) => a + Number(g.valor), 0)
+    el.innerHTML = `📦 <b>${outros.length}</b> lançamento${outros.length > 1 ? 's' : ''} em "Outros" este mês (${fmt(total)}). Organizar <span>→</span>`
+    el.style.display = 'flex'
+  } catch (e) { el.style.display = 'none' }
+}
+function abrirOutros() {
+  document.getElementById('modal-outros').style.display = 'flex'
+  renderListaOutros()
+}
+async function renderListaOutros() {
+  const el = document.getElementById('outros-lista')
+  el.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
+  try {
+    const outros = await gastosOutrosMes()
+    el.innerHTML = outros.length
+      ? outros.map(txItemHTML).join('')
+      : '<div class="pt-vazio">Tudo com categoria 🎉</div>'
+    el.querySelectorAll('.tx-del-btn').forEach(b => b.remove())
+  } catch (e) { el.innerHTML = `<div class="pt-vazio">Não foi possível carregar: ${escH(e.message)}</div>` }
 }
 
 // ── CHAT ──

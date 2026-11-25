@@ -1501,6 +1501,20 @@ function listarImportacoes(familiaId = null) {
   return db.prepare('SELECT * FROM importacoes ORDER BY criado_em DESC LIMIT 30').all()
 }
 
+// Trocar a categoria de lançamentos (um só, ou todos os parecidos da família).
+function gastoPorId(id) {
+  return db.prepare('SELECT g.*, u.familia_id FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE g.id = ?').get(id)
+}
+function gastosDaFamilia(familiaId) {
+  return db.prepare('SELECT g.id, g.descricao, g.usuario_id FROM gastos g JOIN usuarios u ON g.usuario_id = u.id WHERE u.familia_id = ?').all(familiaId)
+}
+function mudarCategoriaGastos(ids, categoria) {
+  const up = db.prepare('UPDATE gastos SET categoria = ? WHERE id = ?')
+  let n = 0
+  for (const id of ids) n += Number(up.run(categoria, id).changes)
+  return n
+}
+
 function deletarGasto(id) {
   const g = db.prepare('SELECT * FROM gastos WHERE id = ?').get(id)
   if (g?.cartao_id) db.prepare('UPDATE cartoes SET gasto_atual = MAX(0, gasto_atual - ?) WHERE id = ?').run(g.valor, g.cartao_id)
@@ -1944,7 +1958,7 @@ module.exports = {
   criarConta, listarContas, atualizarSaldoConta, atualizarConta, deletarConta,
   criarCartao, editarCartao, registrarGastosLote, listarCartoes, obterCartaoPorNome, atualizarGastoCartao, atualizarFaturaCartao, deletarCartao,
   criarEmprestimo, listarEmprestimos, atualizarEmprestimo, editarEmprestimo, deletarEmprestimo, totalDividas,
-  registrarGasto, deletarGasto, limparGastosImportados, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
+  registrarGasto, deletarGasto, gastoPorId, gastosDaFamilia, mudarCategoriaGastos, limparGastosImportados, listarGastosMes, totalGastosMes, gastosPorCategoria, ultimosGastos, gastosPorMes,
   criarMeta, listarMetas, atualizarMeta,
   registrarReceita, listarReceitas, totalReceitasMes, deletarReceita, receitasPorMes,
   listarReceitasProgramadas, adicionarReceitaProgramada, atualizarReceitaProgramada, removerReceitaProgramada, calcularRendaMes,

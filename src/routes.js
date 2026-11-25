@@ -808,6 +808,32 @@ router.delete('/gastos/importados', (req, res) => {
   }
 })
 
+// Trocar a categoria de um lançamento. Com "iguais", muda também os lançamentos da família
+// com a mesma descrição (sem números) e lembra a escolha para os próximos movimentos do banco.
+const CATEGORIAS_GASTO = ['Alimentação', 'Mercado', 'Restaurante', 'Saúde', 'Farmácia', 'Transporte', 'Combustível', 'Educação',
+  'Lazer', 'Vestuário', 'Casa', 'Financiamento', 'Assinatura', 'Outros']
+router.put('/gastos/:id/categoria', (req, res) => {
+  try {
+    const { categoria, iguais } = req.body || {}
+    if (!CATEGORIAS_GASTO.includes(categoria)) return res.status(400).json({ erro: 'Categoria inválida' })
+    const g = db.gastoPorId(parseInt(req.params.id))
+    if (!g) return res.status(404).json({ erro: 'Lançamento não encontrado' })
+    let ids = [g.id]
+    if (iguais) {
+      const chave = of.chaveRegra(String(g.descricao).replace(/\s*\(\d+\/\d+\)$/, ''))
+      if (chave) {
+        const parecidos = db.gastosDaFamilia(g.familia_id)
+          .filter(x => of.chaveRegra(String(x.descricao).replace(/\s*\(\d+\/\d+\)$/, '')) === chave)
+        ids = parecidos.map(x => x.id)
+        for (const u of new Set(parecidos.map(x => x.usuario_id))) db.ofDB.salvarRegra(u, chave, 'gasto', categoria)
+      }
+    }
+    res.json({ ok: true, alterados: db.mudarCategoriaGastos(ids, categoria) })
+  } catch (e) {
+    res.status(500).json({ erro: e.message })
+  }
+})
+
 // Deletar gasto individual
 router.delete('/gastos/:id', (req, res) => {
   try {

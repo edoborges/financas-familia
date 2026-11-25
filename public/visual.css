@@ -445,3 +445,19 @@ select{font-family:var(--fonte)}
 .op-notas{width:100%;border:none;background:var(--preench);border-radius:11px;padding:11px 13px;font-size:.92rem;color:var(--tinta);resize:vertical;outline:none;margin-bottom:6px}
 .op-notas:focus{box-shadow:0 0 0 3px rgba(19,121,91,.22)}
 .op-grid2 > div{display:flex;flex-direction:column;justify-content:flex-end}
+
+/* ── Categoria de um lançamento ── */
+.tx-info,.tx-emoji{cursor:pointer}
+.cg-info{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--preench);border-radius:12px;margin-bottom:14px}
+.cg-info b{font-weight:600;color:var(--tinta);overflow-wrap:anywhere}
+.cg-info span{font-size:.8rem;color:var(--grafite)}
+.cg-grade{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.cg-cat{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px;border:none;border-radius:12px;background:var(--branco);box-shadow:0 0 0 .5px var(--fio);font:500 .74rem/1.2 inherit;color:var(--tinta);cursor:pointer;transition:transform .15s var(--mola)}
+.cg-cat:active{transform:scale(.96)}
+.cg-cat.on{box-shadow:0 0 0 2px var(--c)}
+.cg-ic{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--c);color:#fff}
+.cg-ic .ic{width:18px;height:18px;stroke:#fff}
+.cg-iguais{display:flex;gap:10px;align-items:flex-start;font-size:.82rem;color:var(--grafite);line-height:1.35;margin-bottom:6px}
+.cg-iguais input{margin-top:2px;accent-color:var(--cedula);width:18px;height:18px;flex:none}
+#outros-lista{max-height:60vh;overflow-y:auto}
+#modal-catgasto{z-index:210}
