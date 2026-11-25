@@ -1250,4 +1250,50 @@ router.get('/dividas/custo', (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
+// ── PLANEJAMENTO ──
+const plan = require('./planejamento')
+const escopo = req => [parseInt(req.query.familiaId) || null, parseInt(req.query.usuarioId) || null]
+const famDoUsuario = req => parseInt(req.query.familiaId) || Number(req.usuario.familia_id) || null
+
+router.get('/plan/fechamento', (req, res) => {
+  try { res.json(plan.fechamento(...escopo(req), req.query.mes)) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.get('/plan/reserva', (req, res) => {
+  try { res.json(plan.reserva(...escopo(req))) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/plan/reserva', (req, res) => {
+  try {
+    const [fam, usu] = escopo(req)
+    plan.salvarMetaReserva(fam, usu, req.body.meses)
+    res.json(plan.reserva(fam, usu))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.get('/plan/pessoas', (req, res) => {
+  try { res.json(plan.porPessoa(famDoUsuario(req), req.query.mes)) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.get('/plan/mesadas', (req, res) => {
+  try { res.json(plan.mesadas(famDoUsuario(req), req.usuario.id)) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+// Cada um define só a própria mesada.
+router.post('/plan/mesada', (req, res) => {
+  try {
+    plan.salvarMesada(Number(req.usuario.id), req.body.valor, req.body.categorias)
+    res.json(plan.mesadas(famDoUsuario(req), req.usuario.id))
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.get('/plan/assinaturas', (req, res) => {
+  try { res.json(plan.assinaturas(...escopo(req))) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/plan/assinaturas/marcar', (req, res) => {
+  try {
+    const { chave, acao } = req.body
+    if (!chave || !['ignorar', 'manter', 'revisar'].includes(acao)) return res.status(400).json({ erro: 'Pedido inválido' })
+    plan.marcarAssinatura(famDoUsuario(req), chave, acao)
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/plan/assinaturas/restaurar', (req, res) => {
+  try { plan.restaurarIgnoradas(famDoUsuario(req)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 module.exports = router

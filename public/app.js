@@ -460,6 +460,9 @@ async function carregarInicio() {
     // Patrimônio líquido
     renderPatrimonio(resumo)
 
+    // Planejamento (reserva, mesada, cobranças fixas, dívidas, quem gastou, mês passado)
+    renderPlanejamento().catch(e => console.error('planejamento:', e))
+
     // Orçamentos
     renderOrcamentosSecao()
 
@@ -3583,6 +3586,10 @@ async function sincronizarPush() {
 // Toque numa notificação abre o app em /?aba=agenda&dia=AAAA-MM-DD.
 function abrirLink(url) {
   const p = new URL(url, location.origin).searchParams
+  if (p.get('abrir') === 'fechamento') {
+    abrirPlanej('fechamento')
+    return true
+  }
   if (p.get('aba') === 'metas') {
     mostrarAba('metas')
     navBtn('nav-metas')
@@ -4874,6 +4881,433 @@ async function excluirOportunidade() {
   await api(`/oportunidades/${opEdicao}`, { method: 'DELETE' })
   fecharModal('modal-oportunidade')
   renderOportunidades()
+}
+
+// ══════════════════════════════════════════
+//  PLANEJAMENTO — mês passado, reserva, mesada, cobranças fixas, dívidas, quem gastou
+// ══════════════════════════════════════════
+const fmt0 = v => (Number(v) < 0 ? '-' : '') + 'R$ ' + Math.abs(Math.round(Number(v) || 0)).toLocaleString('pt-BR')
+const mesNome = mes => NOMES_MES[Number(mes.slice(5, 7)) - 1]
+const mesAno = mes => `${mesNome(mes)} de ${mes.slice(0, 4)}`
+const mesCurto = mes => `${mesNome(mes).slice(0, 3).toLowerCase()}/${mes.slice(2, 4)}`
+const somaMesStr = (mes, k) => {
+  const [y, m] = mes.split('-').map(Number)
+  const t = y * 12 + (m - 1) + k
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`
+}
+const mesHojeStr = () => hojeLocalBR().slice(0, 7)
+const num1 = v => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })
+let planejTipo = null, planejMes = null, planejPessoasMes = null, planejDividas = null
+
+async function renderPlanejamento() {
+  const el = document.getElementById('plan-grade')
+  if (!el) return
+  const q = famQ()
+  const [rRes, rMes, rAss, rDiv, rFech, rPes] = await Promise.allSettled([
+    api('/plan/reserva' + q), api('/plan/mesadas' + q), api('/plan/assinaturas' + q),
+    api('/dividas/custo' + q), api('/plan/fechamento' + q), api('/plan/pessoas' + q)
+  ])
+  const v = r => (r.status === 'fulfilled' ? r.value : null)
+  const res = v(rRes), mesadas = v(rMes), ass = v(rAss), div = v(rDiv), fech = v(rFech), pes = v(rPes)
+
+  const tile = (tipo, ico, nome, valor, sub, pct = null, cor = '') => `
+    <button class="pl-tile" onclick="abrirPlanej('${tipo}')">
+      <span class="pl-topo"><span class="pl-ico">${ico}</span><span class="pl-nome">${nome}</span></span>
+      <span class="pl-valor ${cor}">${valor}</span>
+      <span class="pl-sub">${sub}</span>
+      ${pct == null ? '' : `<span class="pl-barra"><i style="width:${Math.max(2, Math.min(100, pct))}%"></i></span>`}
+    </button>`
+
+  const tiles = []
+  // Reserva
+  if (!res || !res.temDados) tiles.push(tile('reserva', '🛟', 'Reserva', '—', 'Precisa de um mês fechado com gastos'))
+  else if (res.falta <= 0 && res.alvo > 0) tiles.push(tile('reserva', '🛟', 'Reserva', 'Completa', `${num1(res.mesesCobertos)} meses do básico`, 100, 'pos'))
+  else tiles.push(tile('reserva', '🛟', 'Reserva', `${num1(res.mesesCobertos)} de ${res.metaMeses} meses`, `Faltam ${fmt0(res.falta)}`, res.pct))
+  // Mesada
+  const minha = (mesadas || []).find(m => m.minha)
+  if (!minha || !minha.configurada) tiles.push(tile('mesada', '👛', 'Minha mesada', 'Definir', 'Um valor livre por mês'))
+  else tiles.push(tile('mesada', '👛', 'Minha mesada', `Restam ${fmt0(minha.resta)}`, `de ${fmt0(minha.valor)} este mês`, minha.pct, minha.resta < 0 ? 'neg' : ''))
+  // Cobranças que se repetem
+  if (!ass || !ass.achadas.length) tiles.push(tile('assinaturas', '🔁', 'Cobranças fixas', 'Nada novo', 'Nenhuma cobrança repetida'))
+  else tiles.push(tile('assinaturas', '🔁', 'Cobranças fixas', `${fmt0(ass.totalAchadasAno)}/ano`,
+    ass.paraRevisar ? `<b class="pl-alerta">${ass.paraRevisar} para revisar</b>` : `${ass.achadas.length} repetidas, revisadas`))
+  // Dívidas
+  if (!div || !div.length) tiles.push(tile('dividas', '💸', 'Saída das dívidas', 'Sem dívidas', 'Nenhuma ativa', null, 'pos'))
+  else {
+    const plano = simularDividas(div, 0, true)
+    const saldo = div.reduce((a, d) => a + d.saldo, 0)
+    tiles.push(plano.meses != null
+      ? tile('dividas', '💸', 'Saída das dívidas', `Livres em ${mesCurto(somaMesStr(mesHojeStr(), plano.meses))}`, `${div.length} dívida${div.length > 1 ? 's' : ''} · ${fmt0(saldo)}`)
+      : tile('dividas', '💸', 'Saída das dívidas', fmt0(saldo), 'Toque para ver a ordem'))
+  }
+  // Quem gastou (sempre da família)
+  if (!pes || !pes.pessoas.length) tiles.push(tile('pessoas', '👨‍👩‍👧', 'Quem gastou', '—', 'Sem gastos neste mês'))
+  else {
+    const [a, b] = pes.pessoas
+    tiles.push(tile('pessoas', '👨‍👩‍👧', 'Quem gastou', `${escH(a.nome.split(' ')[0])} ${a.pct}%`, b ? `${escH(b.nome.split(' ')[0])} ${b.pct}% · este mês` : 'este mês'))
+  }
+  // Mês passado
+  if (!fech || !fech.temDados) tiles.push(tile('fechamento', '📊', 'Mês passado', '—', 'Sem lançamentos'))
+  else if (fech.renda > 0) tiles.push(tile('fechamento', '📊', 'Mês passado', `${fech.resultado >= 0 ? 'Sobrou' : 'Faltou'} ${fmt0(Math.abs(fech.resultado))}`, `${mesNome(fech.mes)} · gastos ${fmt0(fech.gastos)}`, null, fech.resultado >= 0 ? 'pos' : 'neg'))
+  else tiles.push(tile('fechamento', '📊', 'Mês passado', `Gastos ${fmt0(fech.gastos)}`, mesNome(fech.mes)))
+
+  el.innerHTML = tiles.join('')
+  renderFechamentoCard(fech)
+}
+
+// Cartão no topo da Início nos 10 primeiros dias do mês, até a pessoa fechar.
+function renderFechamentoCard(f) {
+  const el = document.getElementById('fechamento-card')
+  if (!el) return
+  const chave = 'fin_fech_visto_' + (usuario?.id || 'x') + '_' + (f?.mes || '')
+  let visto = false
+  try { visto = localStorage.getItem(chave) === '1' } catch (e) {}
+  if (!f || !f.temDados || Number(hojeLocalBR().slice(8, 10)) > 10 || visto) { el.style.display = 'none'; return }
+  const dif = f.gastos - f.gastosAnterior
+  const comp = f.gastosAnterior > 0 ? ` · ${dif >= 0 ? fmt0(dif) + ' a mais' : fmt0(-dif) + ' a menos'} que ${mesNome(f.mesAnterior).toLowerCase()}` : ''
+  const sobra = f.renda > 0 ? (f.resultado >= 0 ? `sobraram <b class="pos">${fmt0(f.resultado)}</b>` : `faltaram <b class="neg">${fmt0(-f.resultado)}</b>`) : ''
+  el.innerHTML = `
+    <div class="fc-topo"><span>📊 Como foi ${mesNome(f.mes).toLowerCase()}</span>
+      <button class="fc-x" aria-label="Dispensar" onclick="event.stopPropagation();dispensarFechamento('${chave}')">✕</button></div>
+    <div class="fc-linha">Gastos de <b>${fmt0(f.gastos)}</b>${comp}${sobra ? ', ' + sobra : ''}.</div>
+    ${f.subiram[0] ? `<div class="fc-linha fc-sub">O que mais subiu: ${escH(f.subiram[0].categoria)} (+${fmt0(f.subiram[0].diferenca)})</div>` : ''}
+    <div class="fc-ver">Ver o resumo <span>→</span></div>`
+  el.style.display = 'block'
+}
+function dispensarFechamento(chave) {
+  try { localStorage.setItem(chave, '1') } catch (e) {}
+  document.getElementById('fechamento-card').style.display = 'none'
+}
+
+const PLANEJ_TITULOS = {
+  fechamento: 'Resumo do mês', reserva: 'Reserva de emergência', mesada: 'Mesada pessoal',
+  assinaturas: 'Cobranças que se repetem', dividas: 'Saída das dívidas', pessoas: 'Quem gastou o quê'
+}
+function abrirPlanej(tipo) {
+  planejTipo = tipo
+  document.getElementById('px-titulo').textContent = PLANEJ_TITULOS[tipo] || ''
+  document.getElementById('px-corpo').innerHTML = '<div class="sk-lines"><div class="sk-line"></div><div class="sk-line"></div><div class="sk-line"></div></div>'
+  document.getElementById('modal-plano-x').style.display = 'flex'
+  if (tipo === 'fechamento') { planejMes = somaMesStr(mesHojeStr(), -1); renderPxFechamento() }
+  else if (tipo === 'reserva') renderPxReserva()
+  else if (tipo === 'mesada') renderPxMesada()
+  else if (tipo === 'assinaturas') renderPxAssinaturas()
+  else if (tipo === 'dividas') renderPxDividas()
+  else if (tipo === 'pessoas') { planejPessoasMes = mesHojeStr(); renderPxPessoas() }
+}
+function fecharPlanej() {
+  fecharModal('modal-plano-x')
+  renderPlanejamento()
+}
+const pxCorpo = html => { document.getElementById('px-corpo').innerHTML = html }
+const pxErro = e => pxCorpo(`<div class="orc-vazio">Não foi possível carregar: ${escH(e.message)}</div>`)
+const catIco = c => EMOJI_CAT[c] || '📦'
+
+// ── Resumo do mês ──
+async function renderPxFechamento() {
+  try {
+    const f = await api('/plan/fechamento' + famQ() + (famQ() ? '&' : '?') + 'mes=' + planejMes)
+    const atual = planejMes === mesHojeStr()
+    const dif = f.gastos - f.gastosAnterior
+    const pctDif = f.gastosAnterior > 0 ? Math.round((dif / f.gastosAnterior) * 100) : null
+    const linhaCat = (c, sinal) => `
+      <div class="px-row"><span class="px-row-ico">${catIco(c.categoria)}</span>
+        <span class="px-row-txt"><b>${escH(c.categoria)}</b><small>${fmt0(c.anterior)} → ${fmt0(c.atual)}</small></span>
+        <span class="px-row-val ${sinal > 0 ? 'neg' : 'pos'}">${sinal > 0 ? '+' : '−'}${fmt0(Math.abs(c.diferenca))}</span></div>`
+    pxCorpo(`
+      <div class="px-nav">
+        <button onclick="navPxFechamento(-1)" aria-label="Mês anterior">‹</button>
+        <b>${mesAno(planejMes)}${atual ? ' <small>(em andamento)</small>' : ''}</b>
+        <button onclick="navPxFechamento(1)" ${atual ? 'disabled' : ''} aria-label="Próximo mês">›</button>
+      </div>
+      ${!f.temDados ? '<div class="orc-vazio">Nenhum gasto lançado neste mês.</div>' : `
+      <div class="px-tres">
+        <div><small>Entradas</small><b>${fmt0(f.renda)}</b></div>
+        <div><small>Gastos</small><b>${fmt0(f.gastos)}</b></div>
+        <div><small>${f.resultado >= 0 ? 'Sobrou' : 'Faltou'}</small><b class="${f.resultado >= 0 ? 'pos' : 'neg'}">${fmt0(Math.abs(f.resultado))}</b></div>
+      </div>
+      ${f.gastosAnterior > 0 ? `<p class="px-txt">Em relação a ${mesNome(f.mesAnterior).toLowerCase()}, os gastos ${dif >= 0 ? 'subiram' : 'caíram'} <b class="${dif >= 0 ? 'neg' : 'pos'}">${fmt0(Math.abs(dif))}</b> (${pctDif >= 0 ? '+' : ''}${pctDif}%).</p>` : ''}
+      ${f.subiram.length ? `<h4 class="px-h">O que mais subiu</h4>${f.subiram.map(c => linhaCat(c, 1)).join('')}` : ''}
+      ${f.cairam.length ? `<h4 class="px-h">O que mais caiu</h4>${f.cairam.map(c => linhaCat(c, -1)).join('')}` : ''}
+      <h4 class="px-h">Para onde foi mais dinheiro</h4>
+      ${f.maiores.map(c => `<div class="px-row"><span class="px-row-ico">${catIco(c.categoria)}</span>
+        <span class="px-row-txt"><b>${escH(c.categoria)}</b><small>${f.gastos > 0 ? Math.round((c.total / f.gastos) * 100) : 0}% dos gastos</small></span>
+        <span class="px-row-val">${fmt0(c.total)}</span></div>`).join('')}
+      <p class="px-nota">Compras parceladas contam no mês de cada parcela.</p>`}`)
+  } catch (e) { pxErro(e) }
+}
+function navPxFechamento(k) {
+  const novo = somaMesStr(planejMes, k)
+  if (novo > mesHojeStr()) return
+  planejMes = novo
+  renderPxFechamento()
+}
+
+// ── Reserva de emergência ──
+async function renderPxReserva() {
+  try { pintarPxReserva(await api('/plan/reserva' + famQ())) } catch (e) { pxErro(e) }
+}
+function pintarPxReserva(r) {
+  if (!r.temDados) {
+    pxCorpo(`<p class="px-txt">Para calcular a reserva, o app precisa de pelo menos um mês fechado com gastos lançados. Volte aqui no começo do próximo mês.</p>`)
+    return
+  }
+  const quem = visaoAtual === 'pessoal' ? 'do seu custo básico' : 'do custo básico de vocês'
+  const quando = r.mesesParaChegar ? mesCurto(somaMesStr(mesHojeStr(), r.mesesParaChegar)) : null
+  let tempo
+  if (r.falta <= 0) tempo = `<p class="px-txt">A reserva está completa. O que sobrar daqui para frente pode ir para outros objetivos.</p>`
+  else if (r.mesesParaChegar) tempo = `<p class="px-txt">Nos últimos meses sobraram em média <b>${fmt0(r.sobraMedia)}</b> por mês. Guardando tudo isso, a reserva fica completa em <b>${r.mesesParaChegar} ${r.mesesParaChegar === 1 ? 'mês' : 'meses'}</b> (${quando}). Guardando metade, em ${r.mesesParaChegar * 2} meses.</p>`
+  else tempo = `<p class="px-txt">Nos últimos meses não sobrou dinheiro no fim do mês. Um começo possível é separar um valor fixo pequeno logo que o dinheiro entra, antes dos outros gastos.</p>`
+  pxCorpo(`
+    <div class="px-destaque">
+      <small>Guardado</small><b>${fmt0(r.guardado)}</b>
+      <span>de ${fmt0(r.alvo)} · ${r.metaMeses} meses do custo básico</span>
+      <span class="pl-barra px-barra"><i style="width:${Math.max(2, r.pct)}%"></i></span>
+    </div>
+    <div class="px-chips"><span>Meta:</span>
+      ${[3, 6, 12].map(n => `<button class="px-chip ${r.metaMeses === n ? 'on' : ''}" onclick="salvarMetaReservaPx(${n})">${n} meses</button>`).join('')}
+    </div>
+    <p class="px-txt">Hoje a reserva cobre <b>${num1(r.mesesCobertos)} ${r.mesesCobertos === 1 ? 'mês' : 'meses'}</b> ${quem}.</p>
+    <h4 class="px-h">Custo básico por mês: ${fmt(r.custoMensal)}</h4>
+    ${r.essenciais.map(c => `<div class="px-row"><span class="px-row-ico">${catIco(c.categoria)}</span><span class="px-row-txt"><b>${escH(c.categoria)}</b></span><span class="px-row-val">${fmt0(c.media)}</span></div>`).join('')}
+    ${r.financiamento > 0 ? `<div class="px-row"><span class="px-row-ico">🏦</span><span class="px-row-txt"><b>Parcelas de dívidas</b></span><span class="px-row-val">${fmt0(r.financiamento)}</span></div>` : ''}
+    <p class="px-nota">Média dos últimos ${r.mesesUsados} ${r.mesesUsados === 1 ? 'mês fechado' : 'meses fechados'}, só com o que continua existindo se a renda parar: casa, mercado, saúde, transporte, educação e parcelas. Lazer, restaurante e assinaturas ficam de fora.</p>
+    <h4 class="px-h">Em quanto tempo</h4>
+    ${tempo}
+    <button class="btn-confirm btn-verde px-btn" onclick="${r.temItemReserva ? 'irParaPatrimonio()' : 'novaReservaPatrimonio()'}">${r.temItemReserva ? 'Atualizar o valor guardado' : 'Cadastrar onde está a reserva'}</button>`)
+}
+async function salvarMetaReservaPx(n) {
+  try {
+    pintarPxReserva(await api('/plan/reserva' + famQ(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meses: n }) }))
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+function irParaPatrimonio() {
+  fecharModal('modal-plano-x')
+  mostrarAba('metas'); navBtn('nav-metas')
+}
+function novaReservaPatrimonio() {
+  fecharModal('modal-plano-x')
+  abrirModalPatrimonio()
+  selPtTipo('reserva')
+  document.getElementById('pt-nome').value = 'Reserva de emergência'
+}
+
+// ── Mesada pessoal ──
+const CATS_MESADA_PADRAO = ['Lazer', 'Vestuário', 'Cuidados pessoais', 'Restaurante']
+let pxMesadaEditando = false, pxMesadaCats = []
+async function renderPxMesada() {
+  try { pintarPxMesada(await api('/plan/mesadas' + famQ())) } catch (e) { pxErro(e) }
+}
+function pintarPxMesada(lista) {
+  const eu = lista.find(m => m.minha)
+  const outros = lista.filter(m => !m.minha)
+  let meu
+  if (!eu || !eu.configurada || pxMesadaEditando) {
+    if (!pxMesadaEditando) pxMesadaCats = (eu && eu.categorias && eu.categorias.length) ? [...eu.categorias] : [...CATS_MESADA_PADRAO]
+    meu = `
+      <p class="px-txt">Escolha um valor para gastar no mês sem precisar explicar para ninguém, e em quais categorias ele vale. O app mostra quanto ainda resta.</p>
+      <label class="px-label">Valor por mês</label>
+      <input id="px-mesada-valor" class="px-input" inputmode="decimal" placeholder="R$ 0,00" value="${eu && eu.valor ? fmtNum(eu.valor) : ''}">
+      <label class="px-label">Conta o que eu lançar em</label>
+      <div class="px-chips px-chips-wrap">${CATS_GASTO.map(c => `<button class="px-chip ${pxMesadaCats.includes(c) ? 'on' : ''}" onclick="togglePxMesadaCat(this, '${c}')">${catIco(c)} ${c}</button>`).join('')}</div>
+      <button class="btn-confirm btn-verde px-btn" onclick="salvarPxMesada()">Salvar mesada</button>`
+  } else {
+    const porDia = eu.diasRestantes > 0 && eu.resta > 0 ? eu.resta / (eu.diasRestantes + 1) : 0
+    meu = `
+      <div class="px-destaque">
+        <small>${eu.resta >= 0 ? 'Restam' : 'Passou'}</small><b class="${eu.resta < 0 ? 'neg' : ''}">${fmt(Math.abs(eu.resta))}</b>
+        <span>gastou ${fmt0(eu.gasto)} de ${fmt0(eu.valor)} neste mês</span>
+        <span class="pl-barra px-barra"><i style="width:${Math.max(2, eu.pct)}%"></i></span>
+      </div>
+      ${porDia > 0 ? `<p class="px-txt">Dá cerca de <b>${fmt0(porDia)} por dia</b> até o fim do mês.</p>` : ''}
+      <p class="px-nota">Conta os seus lançamentos em: ${eu.categorias.map(escH).join(', ')}.</p>
+      <button class="btn-cancel px-btn" onclick="editarPxMesada()">Mudar valor ou categorias</button>`
+  }
+  const deles = outros.map(o => `<div class="px-row"><span class="px-row-ico">👤</span>
+    <span class="px-row-txt"><b>${escH(o.nome.split(' ')[0])}</b><small>${o.configurada ? `de ${fmt0(o.valor)} no mês` : 'ainda não definiu'}</small></span>
+    <span class="px-row-val ${o.resta < 0 ? 'neg' : ''}">${o.configurada ? (o.resta >= 0 ? 'restam ' : 'passou ') + fmt0(Math.abs(o.resta)) : '—'}</span></div>`).join('')
+  pxCorpo(`${meu}${deles ? `<h4 class="px-h">Dos outros</h4>${deles}<p class="px-nota">Do outro aparece só quanto resta, não no que foi gasto.</p>` : ''}`)
+}
+function togglePxMesadaCat(btn, c) {
+  pxMesadaCats = pxMesadaCats.includes(c) ? pxMesadaCats.filter(x => x !== c) : [...pxMesadaCats, c]
+  btn.classList.toggle('on', pxMesadaCats.includes(c))
+}
+function editarPxMesada() {
+  pxMesadaEditando = true
+  api('/plan/mesadas' + famQ()).then(l => {
+    const eu = l.find(m => m.minha)
+    pxMesadaCats = eu && eu.categorias ? [...eu.categorias] : [...CATS_MESADA_PADRAO]
+    pintarPxMesada(l)
+  }).catch(pxErro)
+}
+async function salvarPxMesada() {
+  const valor = parseBRL(document.getElementById('px-mesada-valor').value)
+  if (!(valor > 0)) { toast('Informe o valor da mesada', 'erro'); return }
+  if (!pxMesadaCats.length) { toast('Escolha ao menos uma categoria', 'erro'); return }
+  try {
+    const l = await api('/plan/mesada' + famQ(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ valor, categorias: pxMesadaCats }) })
+    pxMesadaEditando = false
+    toast('✅ Mesada salva')
+    pintarPxMesada(l)
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ── Cobranças que se repetem ──
+async function renderPxAssinaturas() {
+  try {
+    const a = await api('/plan/assinaturas' + famQ())
+    const revisar = a.achadas.filter(x => !x.mantida)
+    const mantidas = a.achadas.filter(x => x.mantida)
+    const linha = (x, botoes) => `
+      <div class="px-ass">
+        <div class="px-row"><span class="px-row-ico">${catIco(x.categoria)}</span>
+          <span class="px-row-txt"><b>${escH(x.descricao)}</b><small>${escH(x.categoria)} · cobrou em ${x.meses} meses${visaoAtual === 'consolidado' ? ' · ' + escH(x.usuario_nome.split(' ')[0]) : ''}</small></span>
+          <span class="px-row-val">${fmt(x.valor)}<small>${fmt0(x.anual)}/ano</small></span></div>
+        <div class="px-ass-btns">${botoes}</div>
+      </div>`
+    pxAssAchadas = a.achadas
+    const btn = (x, acao, txt, cls = '') => `<button class="px-mini ${cls}" onclick="marcarPxAssinatura(${a.achadas.indexOf(x)}, '${acao}')">${txt}</button>`
+    pxCorpo(`
+      ${a.achadas.length ? `<div class="px-destaque"><small>Cobranças repetidas encontradas</small><b>${fmt0(a.totalAchadasAno)}<span class="px-por">/ano</span></b><span>${fmt(a.totalAchadasAno / 12)} por mês</span></div>`
+        : '<p class="px-txt">Nenhuma cobrança nova se repetindo nos últimos 6 meses.</p>'}
+      ${revisar.length ? `<h4 class="px-h">Para revisar</h4><p class="px-nota">Apareceram com o mesmo valor em 3 meses ou mais. Ainda usam?</p>
+        ${revisar.map(x => linha(x, btn(x, 'manter', 'Manter', 'on') + btn(x, 'ignorar', 'Não é mensalidade'))).join('')}` : ''}
+      ${mantidas.length ? `<h4 class="px-h">Vocês decidiram manter</h4>${mantidas.map(x => linha(x, btn(x, 'revisar', 'Rever'))).join('')}` : ''}
+      ${a.fixas.length ? `<h4 class="px-h">Contas fixas cadastradas</h4>${a.fixas.map(f => `<div class="px-row"><span class="px-row-ico">${catIco(f.categoria)}</span>
+        <span class="px-row-txt"><b>${escH(f.descricao)}</b><small>${escH(f.categoria)}</small></span>
+        <span class="px-row-val">${fmt(f.valor)}<small>${fmt0(f.anual)}/ano</small></span></div>`).join('')}` : ''}
+      <p class="px-nota">Para cancelar, cancele direto no serviço. Quando parar de cobrar, ela sai daqui sozinha.</p>
+      ${a.qtdIgnoradas ? `<button class="px-link" onclick="restaurarPxAssinaturas()">Mostrar de novo ${a.qtdIgnoradas === 1 ? 'a que foi marcada' : `as ${a.qtdIgnoradas} marcadas`} como "não é mensalidade"</button>` : ''}`)
+  } catch (e) { pxErro(e) }
+}
+let pxAssAchadas = []
+async function marcarPxAssinatura(idx, acao) {
+  const item = pxAssAchadas[idx]
+  if (!item) return
+  try {
+    await api('/plan/assinaturas/marcar' + famQ(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chave: item.chave, acao }) })
+    renderPxAssinaturas()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function restaurarPxAssinaturas() {
+  try {
+    await api('/plan/assinaturas/restaurar' + famQ(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    renderPxAssinaturas()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ── Saída das dívidas ──
+// Simulação mês a mês. Cada dívida começa pelo valor de quitação de hoje (as parcelas
+// restantes trazidas a valor presente pela taxa dela), rende juros e recebe a parcela.
+// No plano, o valor a mais vai para a de juros mais alto e, quando uma acaba, a parcela
+// dela passa a reforçar a próxima.
+function simularDividas(dividas, extra = 0, plano = true) {
+  const ds = dividas.map(d => {
+    const i = (Number(d.taxa_juros) || 0) / 100
+    const P = Number(d.parcela_mensal) || 0
+    const n = Number(d.parcelas_restantes) || 0
+    let saldo = Number(d.saldo) || 0
+    if (P > 0 && n > 0) {
+      const vp = i > 0 ? P * (1 - Math.pow(1 + i, -n)) / i : P * n
+      saldo = saldo > 0 ? Math.min(saldo, vp) : vp
+    }
+    return { ...d, i, P, saldo, saldo0: saldo, fim: saldo <= 0.01 ? 0 : null, juros: 0 }
+  })
+  const ordem = [...ds].sort((a, b) => b.i - a.i || a.saldo - b.saldo)
+  let mes = 0
+  while (ds.some(d => d.fim == null) && mes < 600) {
+    mes++
+    let livre = plano ? extra : 0
+    for (const d of ds) {
+      if (d.fim != null) { if (plano) livre += d.P; continue }
+      const j = d.saldo * d.i
+      d.saldo += j; d.juros += j
+      const pago = Math.min(d.P, d.saldo)
+      d.saldo -= pago
+      if (plano) livre += d.P - pago
+    }
+    for (const d of ordem) {
+      if (d.fim != null || livre <= 0) continue
+      const pago = Math.min(livre, d.saldo)
+      d.saldo -= pago; livre -= pago
+    }
+    for (const d of ds) if (d.fim == null && d.saldo <= 0.01) d.fim = mes
+  }
+  const fins = ds.map(d => d.fim)
+  return {
+    dividas: ordem, meses: fins.some(f => f == null) ? null : Math.max(0, ...fins),
+    juros: ds.reduce((a, d) => a + d.juros, 0)
+  }
+}
+async function renderPxDividas() {
+  try {
+    planejDividas = await api('/dividas/custo' + famQ())
+    if (!planejDividas.length) {
+      pxCorpo('<p class="px-txt">Nenhuma dívida ativa cadastrada. Se tiver algum empréstimo, financiamento ou acordo, cadastre na aba Contas para ver aqui o caminho para quitar.</p>')
+      return
+    }
+    pxCorpo(`
+      <label class="px-label">Consigo pagar a mais por mês</label>
+      <input id="px-div-extra" class="px-input" inputmode="decimal" placeholder="R$ 0,00" oninput="pintarPxDividas()">
+      <div id="px-div-res"></div>`)
+    pintarPxDividas()
+  } catch (e) { pxErro(e) }
+}
+function pintarPxDividas() {
+  const el = document.getElementById('px-div-res')
+  if (!el || !planejDividas) return
+  const extra = parseBRL(document.getElementById('px-div-extra').value) || 0
+  const base = simularDividas(planejDividas, 0, false)
+  const plano = simularDividas(planejDividas, extra, true)
+  const hoje = mesHojeStr()
+  const quando = m => (m == null ? 'sem data' : m === 0 ? 'já' : mesCurto(somaMesStr(hoje, m)))
+  const economia = base.meses != null && plano.meses != null ? base.juros - plano.juros : null
+  const semTaxa = planejDividas.some(d => !(Number(d.taxa_juros) > 0))
+  const semParcela = planejDividas.some(d => !(Number(d.parcela_mensal) > 0))
+  el.innerHTML = `
+    <div class="px-dois">
+      <div><small>Só as parcelas</small><b>${quando(base.meses)}</b><span>${fmt0(base.juros)} de juros</span></div>
+      <div class="on"><small>Com o plano</small><b>${quando(plano.meses)}</b><span>${fmt0(plano.juros)} de juros</span></div>
+    </div>
+    ${economia != null && economia > 1 ? `<p class="px-txt">Seguindo o plano, vocês ficam livres ${base.meses - plano.meses > 0 ? `<b>${base.meses - plano.meses} meses antes</b> e ` : ''}pagam <b class="pos">${fmt0(economia)} a menos</b> de juros.</p>` : ''}
+    <h4 class="px-h">Ordem para quitar</h4>
+    ${plano.dividas.map((d, k) => `<div class="px-row"><span class="px-rank">${k + 1}</span>
+      <span class="px-row-txt"><b>${escH(d.descricao)}</b><small>${escH(d.credor || '')}${d.taxa_juros > 0 ? ` · ${num1(d.taxa_juros)}% ao mês` : ' · sem taxa informada'} · quitação hoje ${fmt0(d.saldo0)}</small></span>
+      <span class="px-row-val">${quando(d.fim)}<small>quitada</small></span></div>`).join('')}
+    <p class="px-nota">O plano: pague todas as parcelas em dia e coloque o valor a mais na dívida de juros mais altos. Quando uma acabar, a parcela dela passa a reforçar a próxima. Ao antecipar, peça ao credor o valor de quitação: pelo Código de Defesa do Consumidor, os juros das parcelas antecipadas são descontados.</p>
+    ${semTaxa ? '<p class="px-nota">Dívida sem taxa informada fica no fim da fila. Coloque a taxa no cadastro para a ordem ficar certa.</p>' : ''}
+    ${semParcela && plano.meses == null ? '<p class="px-nota">Há dívida sem parcela mensal: informe um valor a mais por mês ou a parcela no cadastro para calcular a data.</p>' : ''}
+    <p class="px-nota">Fatura de cartão paga inteira não entra aqui. Se estiver pagando só o mínimo, cadastre o saldo como dívida com a taxa do rotativo.</p>`
+}
+
+// ── Quem gastou o quê ──
+async function renderPxPessoas() {
+  try {
+    const p = await api('/plan/pessoas?mes=' + planejPessoasMes + famQAnd())
+    const atual = planejPessoasMes === mesHojeStr()
+    pxCorpo(`
+      <div class="px-nav">
+        <button onclick="navPxPessoas(-1)" aria-label="Mês anterior">‹</button>
+        <b>${mesAno(planejPessoasMes)}</b>
+        <button onclick="navPxPessoas(1)" ${atual ? 'disabled' : ''} aria-label="Próximo mês">›</button>
+      </div>
+      ${!p.pessoas.length ? '<div class="orc-vazio">Nenhum gasto neste mês.</div>' : `
+      <p class="px-txt">Total da família: <b>${fmt0(p.total)}</b></p>
+      ${p.pessoas.map(pe => `
+        <div class="px-pessoa">
+          <div class="px-pessoa-topo"><b>${escH(pe.nome)}</b><span>${fmt0(pe.total)} · ${pe.pct}%</span></div>
+          <span class="pl-barra px-barra"><i style="width:${Math.max(2, pe.pct)}%"></i></span>
+          ${pe.categorias.slice(0, 5).map(c => `<div class="px-row px-row-mini"><span class="px-row-ico">${catIco(c.categoria)}</span>
+            <span class="px-row-txt">${escH(c.categoria)}</span><span class="px-row-val">${fmt0(c.total)}</span></div>`).join('')}
+        </div>`).join('')}
+      <p class="px-nota">Mostra quem lançou o gasto ou passou o cartão. O mercado da casa pode estar no nome de um só, então serve para combinar, não para cobrar.</p>`}`)
+  } catch (e) { pxErro(e) }
+}
+function navPxPessoas(k) {
+  const novo = somaMesStr(planejPessoasMes, k)
+  if (novo > mesHojeStr()) return
+  planejPessoasMes = novo
+  renderPxPessoas()
 }
 
 // ── START ──

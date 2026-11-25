@@ -1945,7 +1945,48 @@ function zerarNumerosFamilia(familiaId) {
   return r
 }
 
+// ===== PLANEJAMENTO: reserva, mesada, quem gastou, assinaturas =====
+db.exec(`
+  CREATE TABLE IF NOT EXISTS mesadas (
+    usuario_id INTEGER PRIMARY KEY,
+    valor REAL NOT NULL DEFAULT 0,
+    categorias TEXT NOT NULL DEFAULT '[]',
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`)
+const planDB = {
+  // Gastos por mês e categoria num intervalo de meses (AAAA-MM, inclusive).
+  categoriasPorMes: (familiaId, usuarioId, deMes, ateMes) => _porEscopo(
+    `SELECT strftime('%Y-%m', data_gasto) AS mes, categoria, SUM(valor) AS total FROM gastos WHERE usuario_id = ? AND strftime('%Y-%m', data_gasto) BETWEEN ? AND ? GROUP BY mes, categoria`,
+    `SELECT strftime('%Y-%m', g.data_gasto) AS mes, g.categoria, SUM(g.valor) AS total FROM gastos g JOIN usuarios u ON u.id = g.usuario_id WHERE u.familia_id = ? AND strftime('%Y-%m', g.data_gasto) BETWEEN ? AND ? GROUP BY mes, g.categoria`,
+    `SELECT strftime('%Y-%m', data_gasto) AS mes, categoria, SUM(valor) AS total FROM gastos WHERE strftime('%Y-%m', data_gasto) BETWEEN ? AND ? GROUP BY mes, categoria`,
+    usuarioId, familiaId, deMes, ateMes),
+  receitasPorMes: (familiaId, usuarioId, deMes, ateMes) => _porEscopo(
+    `SELECT strftime('%Y-%m', data_receita) AS mes, SUM(valor) AS total FROM receitas WHERE usuario_id = ? AND strftime('%Y-%m', data_receita) BETWEEN ? AND ? GROUP BY mes`,
+    `SELECT strftime('%Y-%m', r.data_receita) AS mes, SUM(r.valor) AS total FROM receitas r JOIN usuarios u ON u.id = r.usuario_id WHERE u.familia_id = ? AND strftime('%Y-%m', r.data_receita) BETWEEN ? AND ? GROUP BY mes`,
+    `SELECT strftime('%Y-%m', data_receita) AS mes, SUM(valor) AS total FROM receitas WHERE strftime('%Y-%m', data_receita) BETWEEN ? AND ? GROUP BY mes`,
+    usuarioId, familiaId, deMes, ateMes),
+  porPessoa: (familiaId, mes) => db.prepare(
+    `SELECT u.id AS usuario_id, u.nome, g.categoria, SUM(g.valor) AS total, COUNT(*) AS qtd FROM gastos g JOIN usuarios u ON u.id = g.usuario_id
+     WHERE u.familia_id = ? AND u.role != 'super_admin' AND strftime('%Y-%m', g.data_gasto) = ? GROUP BY u.id, g.categoria ORDER BY u.nome, total DESC`).all(familiaId, mes),
+  // Compras à vista dos últimos meses, para achar cobranças que se repetem.
+  gastosDesde: (familiaId, usuarioId, desde, ate) => _porEscopo(
+    `SELECT g.id, g.usuario_id, u.nome AS usuario_nome, g.descricao, g.valor, g.categoria, g.data_gasto, g.cartao_id, g.forma_pagamento, g.recorrente_id FROM gastos g JOIN usuarios u ON u.id = g.usuario_id WHERE g.usuario_id = ? AND g.data_gasto BETWEEN ? AND ? AND COALESCE(g.parcelas, 1) <= 1`,
+    `SELECT g.id, g.usuario_id, u.nome AS usuario_nome, g.descricao, g.valor, g.categoria, g.data_gasto, g.cartao_id, g.forma_pagamento, g.recorrente_id FROM gastos g JOIN usuarios u ON u.id = g.usuario_id WHERE u.familia_id = ? AND g.data_gasto BETWEEN ? AND ? AND COALESCE(g.parcelas, 1) <= 1`,
+    `SELECT g.id, g.usuario_id, u.nome AS usuario_nome, g.descricao, g.valor, g.categoria, g.data_gasto, g.cartao_id, g.forma_pagamento, g.recorrente_id FROM gastos g JOIN usuarios u ON u.id = g.usuario_id WHERE g.data_gasto BETWEEN ? AND ? AND COALESCE(g.parcelas, 1) <= 1`,
+    usuarioId, familiaId, desde, ate),
+  mesadas: (familiaId) => db.prepare(
+    `SELECT u.id AS usuario_id, u.nome, m.valor, m.categorias FROM usuarios u LEFT JOIN mesadas m ON m.usuario_id = u.id WHERE u.familia_id = ? AND u.role != 'super_admin' ORDER BY u.id`).all(familiaId),
+  salvarMesada: (usuarioId, valor, categorias) => db.prepare(
+    `INSERT INTO mesadas (usuario_id, valor, categorias) VALUES (?, ?, ?)
+     ON CONFLICT(usuario_id) DO UPDATE SET valor = excluded.valor, categorias = excluded.categorias, atualizado_em = CURRENT_TIMESTAMP`).run(usuarioId, valor, JSON.stringify(categorias)),
+  gastosMesadaMes: (usuarioId, mes, categorias) => categorias.length
+    ? Number(db.prepare(`SELECT COALESCE(SUM(valor), 0) AS t FROM gastos WHERE usuario_id = ? AND strftime('%Y-%m', data_gasto) = ? AND categoria IN (${categorias.map(() => '?').join(',')})`).get(usuarioId, mes, ...categorias).t)
+    : 0
+}
+
 module.exports = {
+  planDB,
   enriquecerCartoes, investDB, ofDB,
   registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,

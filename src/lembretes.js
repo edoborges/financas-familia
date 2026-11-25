@@ -170,6 +170,32 @@ async function verificarOrcamentos(usuarioId, hoje) {
   return enviados
 }
 
+// Nos três primeiros dias do mês, um resumo de como fechou o mês anterior (da família).
+async function verificarFechamento(usuarioId, hoje) {
+  if (Number(hoje.slice(8, 10)) > 3 || horaBrasilia() < 9) return 0
+  const plan = require('./planejamento')
+  const mesAnt = plan.somaMes(hoje.slice(0, 7), -1)
+  const chave = 'fechamento:' + mesAnt
+  if (db.jaNotificado(usuarioId, chave, 'mes')) return 0
+  const u = db.obterUsuarioPorId(usuarioId)
+  if (!u) return 0
+  const f = plan.fechamento(Number(u.familia_id) || null, null, mesAnt)
+  if (!f.temDados) { db.registrarNotificacao(usuarioId, chave, 'mes'); return 0 }
+  const nomes = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+  const nomeMes = nomes[Number(mesAnt.slice(5, 7)) - 1]
+  const dif = f.gastos - f.gastosAnterior
+  const comp = f.gastosAnterior > 0 ? ` (${dif >= 0 ? fmt(dif) + ' a mais' : fmt(-dif) + ' a menos'} que o mês anterior)` : ''
+  const sobra = f.renda > 0 ? (f.resultado >= 0 ? ` Sobraram ${fmt(f.resultado)}.` : ` Faltaram ${fmt(-f.resultado)}.`) : ''
+  const subiu = f.subiram[0] ? ` O que mais subiu: ${f.subiram[0].categoria}.` : ''
+  const n = await enviarParaUsuario(usuarioId, {
+    title: `📊 Como foi ${nomeMes}`,
+    body: `Vocês gastaram ${fmt(f.gastos)}${comp}.${sobra}${subiu}`,
+    url: '/?abrir=fechamento', tag: 'fechamento'
+  })
+  if (n > 0) db.registrarNotificacao(usuarioId, chave, 'mes')
+  return n
+}
+
 let rodando = false
 async function verificarLembretes({ forcar = false } = {}) {
   const hora = horaBrasilia()
@@ -185,6 +211,7 @@ async function verificarLembretes({ forcar = false } = {}) {
         enviados += await verificarOrcamentos(uid, hoje)
         enviados += await verificarRecebiveis(uid)
         enviados += await verificarChequeEspecial(uid, hoje)
+        enviados += await verificarFechamento(uid, hoje)
       } catch (e) {
         console.error(`lembretes do usuário ${uid} falharam:`, e.message)
       }
