@@ -3,7 +3,7 @@ const router = express.Router()
 const multer = require('multer')
 const db = require('./database')
 const { processarMensagem } = require('./processador')
-const { gerarPlanoEconomia, analisarArquivoFinanceiro } = require('./ai')
+const { gerarPlanoEconomia, analisarArquivoFinanceiro, explicarAcao } = require('./ai')
 const auth = require('./auth')
 const of = require('./openfinance')
 const inv = require('./investimentos')
@@ -339,6 +339,21 @@ router.get('/invest/monitor', async (req, res) => {
 })
 router.get('/invest/noticias/:ticker', async (req, res) => {
   try { res.json(await inv.noticias(req.params.ticker)) } catch (e) { res.status(502).json({ erro: e.message }) }
+})
+// Simulador de ações: histórico de 5 anos e, sob pedido, uma leitura dos números pela IA.
+const tickerValido = t => /^[A-Za-z0-9^.=-]{1,12}$/.test(String(t || ''))
+router.get('/invest/historico/:ticker', async (req, res) => {
+  if (!tickerValido(req.params.ticker)) return res.status(400).json({ erro: 'Código inválido' })
+  try { res.json(await inv.historico(req.params.ticker)) } catch (e) { res.status(404).json({ erro: e.message }) }
+})
+router.post('/invest/analise/:ticker', async (req, res) => {
+  if (!tickerValido(req.params.ticker)) return res.status(400).json({ erro: 'Código inválido' })
+  try {
+    const [h, ind, news] = await Promise.all([
+      inv.historico(req.params.ticker), inv.indicadores(), inv.noticias(req.params.ticker).catch(() => [])
+    ])
+    res.json({ texto: await explicarAcao(h, ind, news, req.body || {}) })
+  } catch (e) { res.status(502).json({ erro: e.message }) }
 })
 router.get('/invest/cotacao/:ticker', async (req, res) => {
   try { res.json(await inv.cotacao(req.params.ticker)) } catch (e) { res.status(404).json({ erro: e.message }) }

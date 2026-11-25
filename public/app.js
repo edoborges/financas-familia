@@ -4264,14 +4264,22 @@ function simular(aportes, horizonte, taxaMensal, comIR) {
 }
 
 let ivVenda = []
+let ivSimModo = 'rf'
+function segSimulador() {
+  return `<div class="mn-seg sim-seg">
+    <button class="${ivSimModo === 'rf' ? 'on' : ''}" onclick="ivSimModo='rf';renderIvSimulador()">Renda fixa</button>
+    <button class="${ivSimModo === 'acoes' ? 'on' : ''}" onclick="ivSimModo='acoes';renderIvSimulador()">Ações e dólar</button>
+  </div>`
+}
 async function renderIvSimulador() {
   const el = document.getElementById('iv-conteudo')
+  if (ivSimModo === 'acoes') return renderSimAcoes()
   try {
     const [i, receb] = await Promise.all([carregarIndicadores(), api('/recebiveis' + famQ())])
     ivVenda = receb.filter(r => !r.recebido_em && r.destino === 'investimento')
     const ultimo = ivVenda.length ? mesesAte(ivVenda[ivVenda.length - 1].data_prevista) : 0
     const totalVenda = ivVenda.reduce((s, r) => s + Number(r.valor), 0)
-    el.innerHTML = `
+    el.innerHTML = segSimulador() + `
       <p class="modal-desc">Quanto o dinheiro renderia mantendo as taxas de hoje (Selic ${String(i.selic).replace('.', ',')}%, CDI ${String(i.cdi).replace('.', ',')}%, inflação ${String(i.ipca12m).replace('.', ',')}%).</p>
       ${ivVenda.length ? `<label class="rf-estimada"><input id="sim-venda" type="checkbox" checked onchange="calcularSimulacao()"><span><b>Usar as parcelas da venda</b> (${fmt(totalVenda)} em ${ivVenda.length} entradas, nas datas previstas)</span></label>` : ''}
       <label class="input-label">Valor que já tem para começar</label>
@@ -4316,6 +4324,150 @@ function calcularSimulacao() {
         <div class="of-sub">Rende ${fmt(l.r.liquido - l.r.aportado)} líquido · em dinheiro de hoje ≈ ${fmt(l.r.liquido / inflacao)} · ${l.obs}</div>
       </div>`).join('')}
     <p class="of-sub">Simulação com as taxas de hoje mantidas constantes, só para comparar ordens de grandeza. Taxas mudam, cada produto tem regras e riscos próprios, e isto não é recomendação.</p>`
+}
+
+// ── Simulador de ações e dólar: o que aconteceu (histórico real) e faixas do que pode acontecer ──
+let simAcao = null, simAcaoResumo = null
+function renderSimAcoes() {
+  const el = document.getElementById('iv-conteudo')
+  el.innerHTML = segSimulador() + `
+    <p class="modal-desc">Use o histórico de 5 anos de uma ação, fundo da bolsa ou do dólar para ver o que teria acontecido e uma faixa do que pode acontecer.</p>
+    <label class="input-label">Código (ex.: PETR4, ITUB4, BOVA11, IVVB11, ou USD para dólar)</label>
+    <div class="sa-busca">
+      <input id="sa-ticker" type="text" autocapitalize="characters" placeholder="PETR4" value="${simAcao ? escH(simAcao.ticker) : ''}" onkeydown="if(event.key==='Enter')carregarSimAcao()" />
+      <button class="btn-save" onclick="carregarSimAcao()">Buscar</button>
+    </div>
+    <label class="input-label">Valor para começar</label>
+    <div class="input-prefix"><span>R$</span><input id="sa-inicial" type="text" inputmode="decimal" placeholder="0,00" value="10.000,00" oninput="calcularSimAcao()" /></div>
+    <label class="input-label">Quanto mais por mês</label>
+    <div class="input-prefix"><span>R$</span><input id="sa-mensal" type="text" inputmode="decimal" placeholder="0,00" oninput="calcularSimAcao()" /></div>
+    <label class="input-label">Por quanto tempo (meses)</label>
+    <input id="sa-meses" type="number" min="1" max="360" value="36" oninput="calcularSimAcao()" />
+    <div id="sa-resultado">${simAcao ? '' : '<div class="pt-vazio">Digite um código e toque em Buscar.</div>'}</div>`
+  if (simAcao) calcularSimAcao()
+}
+
+async function carregarSimAcao() {
+  const t = document.getElementById('sa-ticker').value.trim().toUpperCase()
+  if (!t) return
+  const out = document.getElementById('sa-resultado')
+  out.innerHTML = '<div class="plano-loading"><div class="spinner"></div></div>'
+  try {
+    await carregarIndicadores()
+    simAcao = await api('/invest/historico/' + encodeURIComponent(t))
+    simAcao.ticker = t
+    calcularSimAcao()
+  } catch (e) { simAcao = null; out.innerHTML = `<div class="pt-vazio">${escH(e.message)}</div>` }
+}
+
+// Sorteio com semente fixa: os números não pulam a cada tecla digitada.
+function geradorAleatorio(seed) {
+  let a = seed >>> 0
+  const u = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296 }
+  return () => Math.sqrt(-2 * Math.log(u() || 1e-12)) * Math.cos(2 * Math.PI * u())
+}
+
+function calcularSimAcao() {
+  const h = simAcao, i = ivIndic, out = document.getElementById('sa-resultado')
+  if (!h || !out) return
+  const H = Math.max(1, Math.min(360, parseInt(document.getElementById('sa-meses').value) || 36))
+  const inicial = parseBRL(document.getElementById('sa-inicial').value)
+  const mensal = parseBRL(document.getElementById('sa-mensal').value)
+  const aportado = inicial + mensal * H
+  if (aportado <= 0) { out.innerHTML = '<div class="pt-vazio">Informe um valor para simular.</div>'; return }
+  const ehDolar = h.ticker === 'USD' || h.ticker === 'DOLAR'
+  const nome = ehDolar ? 'Dólar' : h.ticker
+
+  // 1) O que teria acontecido: começando há N meses com os mesmos aportes (preço ajustado = dividendos reinvestidos).
+  // Começo: o mês de H meses atrás (o histórico pode ter meses faltando).
+  const pm = h.meses
+  const ultimo = pm[pm.length - 1].mes
+  const [ua, um] = ultimo.split('-').map(Number)
+  const alvoD = new Date(ua, um - 1 - H, 1)
+  const alvo = `${alvoD.getFullYear()}-${String(alvoD.getMonth() + 1).padStart(2, '0')}`
+  let ini = Math.min(pm.findIndex(m => m.mes >= alvo), pm.length - 2)
+  if (ini < 0) ini = 0
+  const [ia, im] = pm[ini].mes.split('-').map(Number)
+  const N = (ua - ia) * 12 + (um - im)
+  let cotas = inicial / pm[ini].preco
+  const cdiMes = new Map(h.cdiMensal.map(x => [x.mes, x.valor / 100]))
+  let cdiV = inicial, colocadoHist = inicial
+  for (let k = ini + 1; k < pm.length; k++) {
+    cdiV *= 1 + (cdiMes.get(pm[k].mes) ?? 0)
+    cotas += mensal / pm[k].preco
+    cdiV += mensal
+    colocadoHist += mensal
+  }
+  const histFinal = cotas * pm[pm.length - 1].preco
+  const desdeTxt = new Date(pm[ini].mes + '-15').toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
+
+  // 2) O que pode acontecer: 3.000 caminhos sorteados com a média e a oscilação mensais do histórico.
+  let seed = 0; for (const c of h.ticker) seed = seed * 31 + c.charCodeAt(0)
+  const rnd = geradorAleatorio(seed + H)
+  const finais = []
+  for (let s = 0; s < 3000; s++) {
+    let v = inicial
+    for (let m = 1; m <= H; m++) { v *= Math.exp(h.mu + h.sigma * rnd()); v += mensal }
+    finais.push(v)
+  }
+  finais.sort((a, b) => a - b)
+  const q = f => finais[Math.floor(f * (finais.length - 1))]
+  const aportes = []
+  if (inicial > 0) aportes.push({ mes: 0, valor: inicial })
+  if (mensal > 0) for (let m = 1; m <= H; m++) aportes.push({ mes: m, valor: mensal })
+  const cdiFut = simular(aportes, H, taxaMes(i.cdi), true).liquido
+  const chancePerda = finais.filter(v => v < aportado).length / finais.length * 100
+  const chanceCdi = finais.filter(v => v > cdiFut).length / finais.length * 100
+  simAcaoResumo = { meses: H, aportado, p10: q(0.1), p50: q(0.5), p90: q(0.9), cdi: cdiFut, chancePerda, chanceCdi }
+  const max = Math.max(q(0.9), cdiFut)
+  const barra = (v, cor) => `<div class="sim-barra"><div style="width:${Math.max(3, v / max * 100)}%;${cor ? 'background:' + cor : ''}"></div></div>`
+
+  out.innerHTML = `
+    <div class="sa-cab"><b>${escH(ehDolar ? 'Dólar comercial (US$ em R$)' : h.nome)}</b><span>${ehDolar ? 'R$ ' + h.preco.toFixed(2).replace('.', ',') : fmt(h.preco)} hoje</span></div>
+    <div class="sa-stats">
+      <div><span>Últimos ${String(h.anos).replace('.', ',')} anos</span><b class="${h.retornoTotal >= 0 ? 'iv-up' : 'iv-down'}">${pct(h.retornoTotal, 0)}</b><small>${pct(h.retornoAnual, 1)} ao ano</small></div>
+      <div><span>CDI no período</span><b>${pct(h.cdiPeriodo, 0)}</b><small>inflação ${pct(h.ipcaPeriodo, 0)}</small></div>
+      <div><span>Sobe e desce</span><b>${pct(h.volAnual, 0).replace('+', '')}</b><small>ao ano</small></div>
+      <div><span>Maior queda</span><b class="iv-down">${pct(h.maxQueda, 0)}</b><small>do topo ao fundo</small></div>
+    </div>
+
+    <div class="sa-bloco">
+      <div class="sa-tit">Se você tivesse começado em ${desdeTxt}</div>
+      <div class="sim-linha"><div class="sim-topo"><b>${escH(nome)}</b><b>${fmt(histFinal)}</b></div>${barra(histFinal)}</div>
+      <div class="sim-linha"><div class="sim-topo"><b>100% do CDI</b><b>${fmt(cdiV)}</b></div>${barra(cdiV, '#94a3b8')}</div>
+      <div class="of-sub">Colocando ${fmt(colocadoHist)} em ${N} meses${N < H ? ` (o histórico só tem ${N} meses)` : ''}. Valores reais do passado, antes do IR${ehDolar ? '' : ', com dividendos reinvestidos'}.</div>
+    </div>
+
+    <div class="sa-bloco">
+      <div class="sa-tit">Daqui a ${H} meses, se ${ehDolar ? 'o dólar' : escH(nome)} continuar se comportando como nos últimos ${String(h.anos).replace('.', ',')} anos</div>
+      <div class="sim-linha"><div class="sim-topo"><b>Cenário ruim</b><b>${fmt(q(0.1))}</b></div>${barra(q(0.1), '#C93A2E')}</div>
+      <div class="sim-linha"><div class="sim-topo"><b>Cenário do meio</b><b>${fmt(q(0.5))}</b></div>${barra(q(0.5))}</div>
+      <div class="sim-linha"><div class="sim-topo"><b>Cenário bom</b><b>${fmt(q(0.9))}</b></div>${barra(q(0.9), '#13795B')}</div>
+      <div class="sim-linha"><div class="sim-topo"><b>100% do CDI de hoje</b><b>${fmt(cdiFut)}</b></div>${barra(cdiFut, '#94a3b8')}</div>
+      <div class="sa-chances">
+        <div><b>${Math.round(chancePerda)}%</b><span>de chance de terminar com menos que os ${fmt(aportado)} colocados</span></div>
+        <div><b>${Math.round(chanceCdi)}%</b><span>de chance de ganhar do CDI</span></div>
+      </div>
+      <div class="of-sub">3.000 caminhos sorteados com a média e a oscilação de cada mês do histórico. "Ruim" e "bom" são os 10% piores e melhores. ${escH(nome)} antes do IR (${ehDolar ? 'ganho com moeda paga 15% de IR' : 'ações pagam 15% sobre o lucro na venda; vendas de até R$ 20 mil no mês são isentas'}); CDI já com IR. Se os últimos anos foram muito bons para ${ehDolar ? 'o dólar' : escH(nome)}, a faixa sai otimista; se foram ruins, sai pessimista. O passado não garante nada: crises, mudanças na empresa e no país podem levar a resultados fora dessa faixa.</div>
+    </div>
+
+    <button class="rv-btn sa-ia" onclick="explicarSimAcao(this)">✨ Explicar estes números com IA</button>
+    <div id="sa-ia-texto"></div>
+    <p class="of-sub">Isto não é recomendação de compra ou venda. Para decidir, converse com um analista CNPI ou planejador CFP.</p>`
+}
+
+async function explicarSimAcao(btn) {
+  if (!simAcao) return
+  const box = document.getElementById('sa-ia-texto')
+  btn.disabled = true
+  box.innerHTML = '<div class="plano-loading"><div class="spinner"></div><p>Lendo os números…</p></div>'
+  try {
+    const { texto } = await api('/invest/analise/' + encodeURIComponent(simAcao.ticker), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(simAcaoResumo || {})
+    })
+    box.innerHTML = `<div class="plano-texto sa-ia-box">${escH(texto).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/gm, '<b>$1</b>')}</div>`
+  } catch (e) { box.innerHTML = `<div class="pt-vazio">Não foi possível explicar agora: ${escH(e.message)}</div>` }
+  btn.disabled = false
 }
 
 // ── Carteira ──

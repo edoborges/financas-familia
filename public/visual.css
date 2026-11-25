@@ -461,3 +461,25 @@ select{font-family:var(--fonte)}
 .cg-iguais input{margin-top:2px;accent-color:var(--cedula);width:18px;height:18px;flex:none}
 #outros-lista{max-height:60vh;overflow-y:auto}
 #modal-catgasto{z-index:210}
+
+/* ── Simulador de ações e dólar ── */
+.sim-seg{margin-bottom:12px}
+.sa-busca{display:flex;gap:8px;align-items:stretch}
+.sa-busca input{flex:1;text-transform:uppercase;margin:0}
+.sa-busca .btn-save{flex:none;width:auto;padding:0 18px;margin:0;background:var(--cedula);color:#fff;border:none;border-radius:12px;font-weight:600}
+.sa-cab{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:18px 0 10px}
+.sa-cab b{font-weight:600;font-size:.95rem;overflow-wrap:anywhere}
+.sa-cab span{font-family:var(--fonte-num);color:var(--grafite);font-size:.85rem;white-space:nowrap}
+.sa-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:6px}
+.sa-stats div{background:var(--branco);border-radius:12px;box-shadow:0 0 0 .5px var(--fio);padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.sa-stats span{font-size:.72rem;color:var(--grafite)}
+.sa-stats b{font-family:var(--fonte-num);font-size:1.15rem;font-weight:700;font-variant-numeric:tabular-nums}
+.sa-stats small{font-size:.72rem;color:var(--grafite)}
+.sa-bloco{margin-top:18px}
+.sa-tit{font-weight:600;font-size:.92rem;margin-bottom:8px;line-height:1.3}
+.sa-chances{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 6px}
+.sa-chances div{background:var(--preench);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.sa-chances b{font-family:var(--fonte-num);font-size:1.3rem;font-weight:700}
+.sa-chances span{font-size:.74rem;color:var(--grafite);line-height:1.3}
+.sa-ia{width:100%;margin-top:16px}
+.sa-ia-box{background:var(--preench);border-radius:14px;padding:14px;margin-top:10px;font-size:.86rem;line-height:1.6}

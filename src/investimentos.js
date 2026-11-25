@@ -92,6 +92,85 @@ async function indicadores() {
   }
 }
 
+// ── Histórico de um ativo (até 5 anos, mensal) para o simulador de ações ──
+// Usa o preço ajustado (dividendos e desdobramentos), que equivale a reinvestir os proventos.
+const dataBR = s => { const [d, m, a] = String(s).split('/'); return `${a}-${m}-${d}` }
+async function serieMensalBCB(serie, desdeMes) {
+  const [a, m] = desdeMes.split('-')
+  const lista = await emCache(`bcb-${serie}-${desdeMes}`, 6 * HORA, async () => {
+    const r = await fetch(`https://api.bcb.gov.br/dados/serie/bcdata.sgs.${serie}/dados?formato=json&dataInicial=01/${m}/${a}`, { signal: AbortSignal.timeout(20000) })
+    if (!r.ok) throw new Error(`Banco Central HTTP ${r.status}`)
+    return r.json()
+  })
+  return lista.map(x => ({ mes: dataBR(x.data).slice(0, 7), valor: numBR(x.valor) })).sort((a, b) => a.mes.localeCompare(b.mes))
+}
+
+async function historico(ticker) {
+  // "USD" ou "DOLAR" simula guardar dólar (o real contra o dólar comercial).
+  const simbolo = ['USD', 'DOLAR'].includes(String(ticker).toUpperCase()) ? 'BRL=X' : simboloYahoo(ticker)
+  const h = await emCache('hist:' + simbolo, 6 * HORA, async () => {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?range=5y&interval=1mo`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000)
+    })
+    if (!r.ok) throw new Error(`Histórico de ${ticker} indisponível (HTTP ${r.status})`)
+    const res = (await r.json()).chart?.result?.[0]
+    if (!res?.timestamp?.length) throw new Error(`Não achei o ativo ${ticker}`)
+    const adj = res.indicators?.adjclose?.[0]?.adjclose || res.indicators?.quote?.[0]?.close || []
+    // Um ponto por mês: o Yahoo às vezes repete o mês corrente; fica o último.
+    const porMes = new Map()
+    res.timestamp.forEach((t, i) => { if (adj[i] != null && adj[i] > 0) porMes.set(new Date(t * 1000).toISOString().slice(0, 7), adj[i]) })
+    const meses = [...porMes].map(([mes, preco]) => ({ mes, preco }))
+    return {
+      ticker: String(ticker).toUpperCase(), simbolo, nome: res.meta.longName || res.meta.shortName || String(ticker).toUpperCase(),
+      moeda: res.meta.currency || 'BRL', preco: Number(res.meta.regularMarketPrice), meses
+    }
+  })
+  if (h.meses.length < 13) throw new Error(`${h.ticker} tem menos de 1 ano de histórico; não dá para simular`)
+
+  // Estatísticas dos retornos mensais.
+  const rets = []
+  for (let i = 1; i < h.meses.length; i++) rets.push(Math.log(h.meses[i].preco / h.meses[i - 1].preco))
+  const mu = rets.reduce((a, r) => a + r, 0) / rets.length
+  const sigma = Math.sqrt(rets.reduce((a, r) => a + (r - mu) ** 2, 0) / (rets.length - 1))
+  let pico = 0, maxQueda = 0
+  for (const m of h.meses) { pico = Math.max(pico, m.preco); maxQueda = Math.min(maxQueda, m.preco / pico - 1) }
+  const anos = (h.meses.length - 1) / 12
+  const total = h.meses[h.meses.length - 1].preco / h.meses[0].preco - 1
+  const mesesPositivos = rets.filter(r => r > 0).length / rets.length
+
+  // CDI e inflação do mesmo período, mês a mês (o mês corrente entra parcial).
+  const [cdi, ipca] = await Promise.all([serieMensalBCB(4391, h.meses[0].mes), serieMensalBCB(433, h.meses[0].mes)])
+  const noPeriodo = s => s.filter(x => x.mes > h.meses[0].mes)
+  const acum = s => noPeriodo(s).reduce((f, x) => f * (1 + x.valor / 100), 1) - 1
+  let dolar = null
+  try {
+    const d = await historicoSimples('BRL=X')
+    const ini = d.find(x => x.mes === h.meses[0].mes) || d[0]
+    dolar = d[d.length - 1].preco / ini.preco - 1
+  } catch (e) { /* câmbio fora do ar não derruba a simulação */ }
+
+  return {
+    ticker: h.ticker, nome: h.nome, moeda: h.moeda, preco: h.preco,
+    desde: h.meses[0].mes, anos: +anos.toFixed(1),
+    retornoTotal: total * 100, retornoAnual: (Math.pow(1 + total, 1 / anos) - 1) * 100,
+    volAnual: sigma * Math.sqrt(12) * 100, maxQueda: maxQueda * 100, mesesPositivos: mesesPositivos * 100,
+    mu, sigma,
+    cdiPeriodo: acum(cdi) * 100, ipcaPeriodo: acum(ipca) * 100, dolarPeriodo: dolar != null ? dolar * 100 : null,
+    meses: h.meses, cdiMensal: noPeriodo(cdi)
+  }
+}
+async function historicoSimples(simbolo) {
+  return emCache('histS:' + simbolo, 6 * HORA, async () => {
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?range=5y&interval=1mo`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000)
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const res = (await r.json()).chart.result[0]
+    const c = res.indicators.quote[0].close
+    return res.timestamp.map((t, i) => ({ mes: new Date(t * 1000).toISOString().slice(0, 7), preco: c[i] })).filter(m => m.preco)
+  })
+}
+
 // CDI acumulado desde uma data (fator multiplicativo), a partir da série diária oficial (12).
 async function fatorCdiDesde(dataISO, percentual = 100) {
   const [a, m, d] = String(dataISO).slice(0, 10).split('-')
@@ -189,4 +268,4 @@ async function noticias(ticker) {
   })
 }
 
-module.exports = { cotacao, indicadores, valorAtual, simboloYahoo, monitor, noticias }
+module.exports = { cotacao, indicadores, valorAtual, simboloYahoo, monitor, noticias, historico }

@@ -200,6 +200,51 @@ Regras:
   return response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
 }
 
+// Leitura em linguagem simples dos números do simulador de ações. Explica, não recomenda.
+async function explicarAcao(h, ind, noticias = [], sim = {}) {
+  const p = v => v == null || isNaN(v) ? 'n/d' : `${Number(v).toFixed(1).replace('.', ',')}%`
+  const R = v => 'R$' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const simTexto = sim && sim.aportado ? `
+SIMULAÇÃO QUE A PESSOA FEZ (${sim.meses} meses, colocando ${R(sim.aportado)} no total):
+- Cenário ruim (10% piores): ${R(sim.p10)} · mediano: ${R(sim.p50)} · bom (10% melhores): ${R(sim.p90)}
+- Mesmo dinheiro a 100% do CDI de hoje, já com IR: ${R(sim.cdi)}
+- Chance de terminar com menos do que colocou: ${p(sim.chancePerda)} · chance de ganhar do CDI: ${p(sim.chanceCdi)}` : ''
+
+  const prompt = `Você explica números de investimento para um casal leigo, dentro de um app de finanças. Explique o que os dados abaixo mostram sobre ${h.ticker} (${h.nome}).
+
+HISTÓRICO DE ${h.anos} ANOS (desde ${h.desde}, preço ajustado com dividendos):
+- Retorno total: ${p(h.retornoTotal)} (${p(h.retornoAnual)} ao ano)
+- Oscilação anual (volatilidade): ${p(h.volAnual)}
+- Maior queda do topo ao fundo no período: ${p(h.maxQueda)}
+- Meses com alta: ${p(h.mesesPositivos)}
+- No mesmo período: CDI acumulou ${p(h.cdiPeriodo)}, inflação ${p(h.ipcaPeriodo)}, dólar variou ${p(h.dolarPeriodo)}
+${simTexto}
+
+CENÁRIO DO PAÍS HOJE: Selic ${String(ind.selic).replace('.', ',')}%, CDI ${String(ind.cdi).replace('.', ',')}%, inflação 12 meses ${String(ind.ipca12m).replace('.', ',')}%${ind.ibov ? `, Ibovespa ${p(ind.ibov.variacao12m)} em 12 meses` : ''}${ind.dolar ? `, dólar R$${Number(ind.dolar.valor).toFixed(2).replace('.', ',')}` : ''}.
+
+MANCHETES RECENTES SOBRE A AÇÃO:
+${noticias.slice(0, 5).map(n => `- ${n.titulo} (${n.fonte || 's/ fonte'})`).join('\n') || '- nenhuma encontrada'}
+
+Escreva em até 300 palavras:
+1. O que o histórico mostra (ganho, sobe-e-desce, maior queda), comparando com o CDI do mesmo período.
+2. Como o cenário do país (juros, inflação, dólar) costuma afetar empresas desse setor, em termos gerais.
+3. O que as manchetes indicam, sem exagerar.
+4. Por que o passado não garante o futuro e o risco de concentrar dinheiro numa ação só.
+
+Regras obrigatórias:
+- Não diga para comprar, vender, manter, nem se é "boa" ou "ruim" para eles. Não dê preço-alvo nem previsão de preço.
+- Use só os números dados; não invente dados da empresa (lucro, dívida, dividendos) que não estão aqui.
+- Termine dizendo que, para decidir, vale conversar com um analista CNPI ou planejador CFP.
+- Texto simples para celular, sem tabelas; títulos curtos em **negrito**.`
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1500,
+    messages: [{ role: 'user', content: prompt }]
+  })
+  return response.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
+}
+
 async function analisarArquivoFinanceiro(base64Data, mediaType, nomeArquivo = '') {
   const isPDF = mediaType === 'application/pdf'
   const contentBlock = isPDF
@@ -306,4 +351,4 @@ Resumo em 3-4 linhas com emojis, tom animado e uma dica rápida. Máximo 100 pal
   return response.content[0].text
 }
 
-module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario, analisarArquivoFinanceiro }
+module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario, analisarArquivoFinanceiro, explicarAcao }
