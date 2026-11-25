@@ -52,6 +52,7 @@ const CATEGORIAS = [
   [/escola|faculd|curso|educa|livrar/, 'Educação'],
   [/medic|clinic|hospital|laborat|odonto|saude|health/, 'Saúde'],
   [/roupa|calcad|renner|riachuelo|cea\b|zara|clothing|vestu/, 'Vestuário'],
+  [/cabel|barbear|barber|salao|manicure|estetica|beleza|cosmet|boticario|sephora/, 'Cuidados pessoais'],
   [/enel|sabesp|luz|energia|agua|aluguel|condomin|casa|reforma|construc|housing|electricity|water/, 'Casa'],
   [/cinema|show|ingresso|lazer|leisure|entertainment|viagem|hotel|travel/, 'Lazer'],
   [/financ|emprestimo|loan|parcela do carro|andbank|creditas/, 'Financiamento']

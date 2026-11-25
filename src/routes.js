@@ -826,7 +826,7 @@ router.delete('/gastos/importados', (req, res) => {
 // Trocar a categoria de um lançamento. Com "iguais", muda também os lançamentos da família
 // com a mesma descrição (sem números) e lembra a escolha para os próximos movimentos do banco.
 const CATEGORIAS_GASTO = ['Alimentação', 'Mercado', 'Restaurante', 'Saúde', 'Farmácia', 'Transporte', 'Combustível', 'Educação',
-  'Lazer', 'Vestuário', 'Casa', 'Financiamento', 'Assinatura', 'Outros']
+  'Lazer', 'Vestuário', 'Cuidados pessoais', 'Casa', 'Financiamento', 'Assinatura', 'Outros']
 router.put('/gastos/:id/categoria', (req, res) => {
   try {
     const { categoria, iguais } = req.body || {}
@@ -1021,6 +1021,7 @@ function mapearCategoriaCSV(cat) {
   if (/educa|escola|curso|livro/.test(c)) return 'Educação'
   if (/lazer|entretenimento|cinema|viagem|hotel/.test(c)) return 'Lazer'
   if (/vestuário|vestuario|roupa|calçado/.test(c)) return 'Vestuário'
+  if (/cabel|barbe|salão|salao|manicure|estética|estetica|beleza|cosmét|cosmet/.test(c)) return 'Cuidados pessoais'
   if (/casa|aluguel|condomin|água|luz|internet|gás/.test(c)) return 'Casa'
   if (/assinatura|netflix|spotify|amazon/.test(c)) return 'Assinatura'
   return 'Outros'

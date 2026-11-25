@@ -76,14 +76,14 @@ const SAUDACOES = () => {
 const EMOJI_CAT = {
   'Alimentação':'🍽️','Mercado':'🛒','Saúde':'💊','Farmácia':'💊',
   'Transporte':'🚗','Combustível':'⛽','Educação':'📚','Lazer':'🎉',
-  'Vestuário':'👕','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱',
+  'Vestuário':'👕','Cuidados pessoais':'💇','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱',
   'Restaurante':'🍕','Outros':'📦'
 }
 // Uma cor por categoria, usada no calendário, na pizza e nas barras de orçamento.
 const COR_CAT = {
   'Alimentação':'#f97316','Mercado':'#84cc16','Saúde':'#ef4444','Farmácia':'#f43f5e',
   'Transporte':'#3b82f6','Combustível':'#0ea5e9','Educação':'#8b5cf6','Lazer':'#ec4899',
-  'Vestuário':'#d946ef','Casa':'#a16207','Financiamento':'#64748b','Assinatura':'#6366f1',
+  'Vestuário':'#d946ef','Cuidados pessoais':'#db2777','Casa':'#a16207','Financiamento':'#64748b','Assinatura':'#6366f1',
   'Restaurante':'#f59e0b','Outros':'#94a3b8','Fatura':'#475569'
 }
 const corCat = c => COR_CAT[c] || '#94a3b8'
@@ -2701,7 +2701,7 @@ function gerarDicasSaude(s) {
 // ══════════════════════════════════════════
 //  ORÇAMENTOS POR CATEGORIA
 // ══════════════════════════════════════════
-const EMOJI_CAT_ORC = { 'Alimentação':'🍽️','Mercado':'🛒','Saúde':'💊','Farmácia':'💊','Transporte':'🚗','Combustível':'⛽','Educação':'📚','Lazer':'🎉','Vestuário':'👕','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱','Restaurante':'🍕','Outros':'📦' }
+const EMOJI_CAT_ORC = { 'Alimentação':'🍽️','Mercado':'🛒','Saúde':'💊','Farmácia':'💊','Transporte':'🚗','Combustível':'⛽','Educação':'📚','Lazer':'🎉','Vestuário':'👕','Cuidados pessoais':'💇','Casa':'🏠','Financiamento':'🏦','Assinatura':'📱','Restaurante':'🍕','Outros':'📦' }
 
 async function abrirModalOrcamentos() {
   document.getElementById('orc-limite').value = ''
@@ -3951,7 +3951,7 @@ async function desfazerTransferencia(id) {
 //  OPEN FINANCE (Meu Pluggy)
 // ══════════════════════════════════════════
 const PLUGGY_CONNECT_JS = 'https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js'
-const CATS_GASTO = ['Mercado','Alimentação','Restaurante','Combustível','Transporte','Casa','Saúde','Farmácia','Educação','Lazer','Vestuário','Assinatura','Financiamento','Outros']
+const CATS_GASTO = ['Mercado','Alimentação','Restaurante','Combustível','Transporte','Casa','Saúde','Farmácia','Educação','Lazer','Vestuário','Cuidados pessoais','Assinatura','Financiamento','Outros']
 let ofStatus = null
 
 async function renderBannerRevisar() {

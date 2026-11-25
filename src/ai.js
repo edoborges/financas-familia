@@ -4,7 +4,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const CATEGORIAS = [
   'Alimentação', 'Mercado', 'Saúde', 'Farmácia', 'Transporte',
-  'Combustível', 'Educação', 'Lazer', 'Vestuário', 'Casa',
+  'Combustível', 'Educação', 'Lazer', 'Vestuário', 'Cuidados pessoais', 'Casa',
   'Financiamento', 'Assinatura', 'Restaurante', 'Outros'
 ]
 
