@@ -1358,7 +1358,19 @@ const lerViagem = b => {
     pessoas: Math.min(10, Math.max(1, parseInt(b.pessoas) || 2)), custos,
     status: ['ideia', 'planejada', 'reservada', 'feita'].includes(b.status) ? b.status : 'ideia',
     forma: ['dinheiro', 'cartao', 'misto'].includes(b.forma) ? b.forma : 'dinheiro',
-    cartaoId: parseInt(b.cartaoId) || null, parcelas: Math.min(24, Math.max(1, parseInt(b.parcelas) || 1)), notas: txt(b.notas, 600)
+    cartaoId: parseInt(b.cartaoId) || null, parcelas: Math.min(24, Math.max(1, parseInt(b.parcelas) || 1)), notas: txt(b.notas, 600),
+    detalhes: lerDetalhesViagem(b.detalhes)
+  }
+}
+// Detalhes da sugestão da IA guardados com a viagem (só na criação).
+function lerDetalhesViagem(d) {
+  if (!d || typeof d !== 'object') return null
+  const url = /^https?:\/\//.test(String(d.fonte_url || '')) ? txt(d.fonte_url, 500) : ''
+  return {
+    porque: txt(d.porque, 400), hospedagem: txt(d.hospedagem, 160), deslocamento: txt(d.deslocamento, 80),
+    como_ir: ['carro', 'aviao', 'onibus'].includes(d.como_ir) ? d.como_ir : 'carro',
+    oportunidade: txt(d.oportunidade, 300), fonte_url: url, base_precos: d.base_precos === 'pesquisa' ? 'pesquisa' : 'estimativa',
+    dicas: (Array.isArray(d.dicas) ? d.dicas : []).slice(0, 4).map(x => txt(x, 200))
   }
 }
 router.post('/viagem/viagens', (req, res) => {

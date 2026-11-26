@@ -146,12 +146,33 @@ function planoPagamento(v, cap) {
   }
 }
 
+// Viagem salva antes de os detalhes serem guardados: busca na pesquisa que a originou.
+function detalhesDaPesquisa(fam) {
+  const mapa = new Map()
+  for (const row of V.sugestoesRecentes(fam)) {
+    try {
+      for (const s of JSON.parse(row.conteudo).sugestoes || []) {
+        const k = String(s.destino || '').toLowerCase()
+        if (k && !mapa.has(k)) mapa.set(k, s)
+      }
+    } catch (_) {}
+  }
+  return mapa
+}
+
 function listarViagens(fam) {
   const cap = capacidade(fam)
+  let pesquisas = null
   return V.viagens(fam).map(v => {
-    let custos = {}
+    let custos = {}, detalhes = null
     try { custos = JSON.parse(v.custos || '{}') } catch (_) {}
-    const item = { ...v, custos }
+    try { detalhes = v.detalhes ? JSON.parse(v.detalhes) : null } catch (_) {}
+    if (!detalhes) {
+      pesquisas = pesquisas || detalhesDaPesquisa(fam)
+      const s = pesquisas.get(String(v.destino).toLowerCase())
+      if (s) detalhes = { porque: s.porque, hospedagem: s.hospedagem, deslocamento: s.deslocamento, como_ir: s.como_ir, oportunidade: s.oportunidade, fonte_url: s.fonte_url, base_precos: s.base_precos, dicas: s.dicas || [] }
+    }
+    const item = { ...v, custos, detalhes }
     return { ...item, pagamento: planoPagamento(item, cap) }
   })
 }

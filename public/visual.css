@@ -592,7 +592,12 @@ select{font-family:var(--fonte)}
 @media (max-width:420px){.vg-form-2{grid-template-columns:1fr 1fr}.vg-form-2 input:first-child{grid-column:1 / -1}}
 .vg-input-txt{font-family:var(--fonte);font-size:.95rem}
 .vg-notas{min-height:70px;resize:vertical}
-.vg-duas{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.vg-duas{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.vg-duas>div{min-width:0}
+/* iPhone: o campo de data tem largura própria e vaza da tela sem isto */
+.vg-data{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;min-height:46px;display:block;text-align:left;font-size:.9rem;padding-left:12px;padding-right:12px}
+.vg-data::-webkit-date-and-time-value{text-align:left}
+.vg-form input[type=date]{-webkit-appearance:none;appearance:none;min-width:0}
 .vg-custo-linha{display:grid;grid-template-columns:110px 1fr;align-items:center;gap:8px;font-size:.88rem}
 .vg-custo-linha .px-input{margin-top:4px;padding:9px 12px}
 .vg-total{margin-top:14px}

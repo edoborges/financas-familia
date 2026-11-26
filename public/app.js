@@ -5514,9 +5514,12 @@ function pintarVgSugestoes() {
 }
 async function salvarVgSugestao(i) {
   const x = vgSug.sugestoes[i], j = vgJanela
-  const notas = [x.porque, x.hospedagem ? 'Hospedagem: ' + x.hospedagem : '', x.oportunidade, x.fonte_url].filter(Boolean).join('\n')
+  const detalhes = {
+    porque: x.porque, hospedagem: x.hospedagem, deslocamento: x.deslocamento, como_ir: x.como_ir,
+    oportunidade: x.oportunidade, fonte_url: x.fonte_url, base_precos: x.base_precos, dicas: x.dicas
+  }
   try {
-    const r = await vgPost('/viagem/viagens', { destino: x.destino, ida: j.inicio, volta: j.fim, custos: x.custos, status: 'ideia', notas })
+    const r = await vgPost('/viagem/viagens', { destino: x.destino, ida: j.inicio, volta: j.fim, custos: x.custos, status: 'ideia', notas: '', detalhes })
     toast('✅ Viagem salva')
     vgPainel = await api('/viagem/painel')
     renderViagens()
@@ -5531,11 +5534,12 @@ function abrirViagemPlano(id = null) {
   document.getElementById('vgm-titulo').textContent = v ? v.destino : 'Nova viagem'
   vgCorpo(`
     <label class="px-label">Destino</label>
-    <input id="vgp-destino" class="px-input vg-input-txt" maxlength="80" value="${escH(v?.destino || '')}" placeholder="Ex.: Campos do Jordão, SP">
+    <input id="vgp-destino" class="px-input vg-input-txt" maxlength="80" value="${escH(v?.destino || '')}" placeholder="Ex.: Campos do Jordão, SP" oninput="pintarVgReserva()">
     <div class="vg-duas">
-      <div><label class="px-label">Ida</label><input id="vgp-ida" class="px-input vg-input-txt" type="date" value="${v?.ida || ''}" onchange="pintarVgPagamento()"></div>
-      <div><label class="px-label">Volta</label><input id="vgp-volta" class="px-input vg-input-txt" type="date" value="${v?.volta || ''}"></div>
+      <div><label class="px-label">Ida</label><input id="vgp-ida" class="px-input vg-input-txt vg-data" type="date" value="${v?.ida || ''}" onchange="pintarVgPagamento(); pintarVgReserva()"></div>
+      <div><label class="px-label">Volta</label><input id="vgp-volta" class="px-input vg-input-txt vg-data" type="date" value="${v?.volta || ''}" onchange="pintarVgReserva()"></div>
     </div>
+    <div id="vgp-reserva"></div>
     <label class="px-label">Situação</label>
     <div class="px-chips px-chips-wrap" id="vgp-status">${Object.entries(VG_STATUS).map(([k, n]) => `<button class="px-chip ${(v?.status || 'ideia') === k ? 'on' : ''}" data-v="${k}" onclick="selVgStatus(this)">${n}</button>`).join('')}</div>
     <h4 class="px-h">Custos para ${v?.pessoas || 2} pessoas</h4>
@@ -5548,7 +5552,31 @@ function abrirViagemPlano(id = null) {
     ${v && v.meta_id ? '<p class="px-nota">Há uma meta para esta viagem na aba Metas.</p>' : ''}
     ${v ? `<button class="px-link vg-excluir" onclick="excluirViagemPlano(${v.id})">Excluir viagem</button>` : ''}`)
   document.getElementById('modal-viagem').style.display = 'flex'
+  vgPlanoDetalhes = v?.detalhes || null
+  pintarVgReserva()
   pintarVgPagamento()
+}
+
+// Onde ficar e onde reservar: o que a IA encontrou + links com as datas do plano.
+let vgPlanoDetalhes = null
+function pintarVgReserva() {
+  const el = document.getElementById('vgp-reserva')
+  if (!el) return
+  const d = vgPlanoDetalhes
+  const destino = document.getElementById('vgp-destino').value.trim()
+  const ida = document.getElementById('vgp-ida').value, volta = document.getElementById('vgp-volta').value
+  const links = destino && ida && volta && volta >= ida
+    ? `<div class="vg-acoes">${linksBusca(destino, ida, volta, d?.como_ir || 'aviao')}</div>`
+    : '<p class="px-nota">Preencha o destino e as datas para abrir as buscas de hospedagem e passagem.</p>'
+  el.innerHTML = `
+    <h4 class="px-h">Onde ficar e reservar</h4>
+    ${d ? `
+      ${d.deslocamento ? `<p class="px-txt"><b>Como ir:</b> ${escH(d.deslocamento)}</p>` : ''}
+      ${d.hospedagem ? `<p class="px-txt"><b>Hospedagem:</b> ${escH(d.hospedagem)}</p>` : ''}
+      ${d.oportunidade ? `<p class="px-txt vg-oport">${escH(d.oportunidade)}${d.fonte_url ? ` <a target="_blank" rel="noopener" href="${escH(d.fonte_url)}">ver fonte</a>` : ''}</p>` : ''}
+      ${d.dicas && d.dicas.length ? `<ul class="px-lista">${d.dicas.map(x => `<li>${escH(x)}</li>`).join('')}</ul>` : ''}` : ''}
+    ${links}
+    <p class="px-nota">Os links abrem a busca com as datas da viagem para 2 pessoas. Os preços de lá são os reais do momento.</p>`
 }
 function selVgStatus(btn) {
   document.querySelectorAll('#vgp-status .px-chip').forEach(b => b.classList.toggle('on', b === btn))

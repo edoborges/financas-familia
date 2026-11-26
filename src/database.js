@@ -2034,6 +2034,9 @@ db.exec(`
     criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `)
+// O que veio da sugestão da IA (hospedagem, promoção, fonte, dicas) fica guardado com a viagem.
+try { db.exec('ALTER TABLE viagens ADD COLUMN detalhes TEXT') } catch (_) { /* coluna já existe */ }
+
 // Tudo filtrado pela família: um registro de outra família nunca é lido nem alterado.
 const viagemDB = {
   datas: fam => db.prepare('SELECT * FROM viagem_datas WHERE familia_id = ? ORDER BY strftime(\'%m-%d\', data)').all(fam),
@@ -2054,11 +2057,13 @@ const viagemDB = {
       db.prepare('UPDATE viagens SET destino=?, ida=?, volta=?, pessoas=?, custos=?, status=?, forma=?, cartao_id=?, parcelas=?, notas=? WHERE id = ? AND familia_id = ?').run(...campos, id, fam)
       return id
     }
-    return Number(db.prepare('INSERT INTO viagens (destino, ida, volta, pessoas, custos, status, forma, cartao_id, parcelas, notas, familia_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...campos, fam).lastInsertRowid)
+    return Number(db.prepare('INSERT INTO viagens (destino, ida, volta, pessoas, custos, status, forma, cartao_id, parcelas, notas, detalhes, familia_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(...campos, v.detalhes ? JSON.stringify(v.detalhes) : null, fam).lastInsertRowid)
   },
   ligarMeta: (fam, id, metaId) => db.prepare('UPDATE viagens SET meta_id = ? WHERE id = ? AND familia_id = ?').run(metaId, id, fam),
   delViagem: (fam, id) => db.prepare('DELETE FROM viagens WHERE id = ? AND familia_id = ?').run(id, fam),
   sugestao: (fam, chave, desde) => db.prepare('SELECT * FROM viagem_sugestoes WHERE familia_id = ? AND chave = ? AND criado_em >= ? ORDER BY id DESC LIMIT 1').get(fam, chave, desde),
+  sugestoesRecentes: fam => db.prepare('SELECT conteudo FROM viagem_sugestoes WHERE familia_id = ? ORDER BY id DESC LIMIT 30').all(fam),
   salvarSugestao: (fam, chave, conteudo) => db.prepare('INSERT INTO viagem_sugestoes (familia_id, chave, conteudo) VALUES (?, ?, ?)').run(fam, chave, conteudo)
 }
 
