@@ -1292,6 +1292,113 @@ router.post('/plan/assinaturas/marcar', (req, res) => {
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
+// ── VIAGENS ──
+const vg = require('./viagens')
+const VDB = db.viagemDB
+const vDataOk = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''))
+const txt = (s, n) => String(s || '').trim().slice(0, n)
+
+router.get('/viagem/painel', (req, res) => {
+  try {
+    const fam = famDoUsuario(req)
+    res.json({
+      janelas: vg.janelas(fam), datas: VDB.datas(fam), ferias: VDB.ferias(fam), destinos: VDB.destinos(fam),
+      viagens: vg.listarViagens(fam), capacidade: vg.capacidade(fam)
+    })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/viagem/datas', (req, res) => {
+  try {
+    const titulo = txt(req.body.titulo, 60)
+    if (!titulo || !vDataOk(req.body.data)) return res.status(400).json({ erro: 'Informe o nome e a data' })
+    VDB.addData(famDoUsuario(req), titulo, req.body.data)
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/viagem/datas/:id', (req, res) => {
+  try { VDB.delData(famDoUsuario(req), parseInt(req.params.id)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/viagem/ferias', (req, res) => {
+  try {
+    const { inicio, fim, usuarioId } = req.body
+    if (!vDataOk(inicio) || !vDataOk(fim) || fim < inicio) return res.status(400).json({ erro: 'Informe o início e o fim das férias' })
+    VDB.addFerias(famDoUsuario(req), parseInt(usuarioId) || null, inicio, fim, txt(req.body.obs, 80))
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/viagem/ferias/:id', (req, res) => {
+  try { VDB.delFerias(famDoUsuario(req), parseInt(req.params.id)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.post('/viagem/destinos', (req, res) => {
+  try {
+    const nome = txt(req.body.nome, 60)
+    if (!nome) return res.status(400).json({ erro: 'Informe o lugar' })
+    VDB.addDestino(famDoUsuario(req), nome, txt(req.body.obs, 80))
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/viagem/destinos/:id', (req, res) => {
+  try { VDB.delDestino(famDoUsuario(req), parseInt(req.params.id)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+// Pesquisa da IA: pode levar mais de um minuto.
+router.post('/viagem/sugerir', async (req, res) => {
+  try {
+    const { inicio, fim, motivo, foco, forcar } = req.body
+    res.json(await vg.sugerir(famDoUsuario(req), { inicio, fim, motivo, foco }, !!forcar))
+  } catch(e) {
+    console.error('viagem/sugerir:', e.message)
+    res.status(500).json({ erro: e.message })
+  }
+})
+const lerViagem = b => {
+  const custos = {}
+  for (const k of ['transporte', 'hospedagem', 'alimentacao', 'passeios', 'outros']) custos[k] = Math.max(0, Number(b.custos?.[k]) || 0)
+  return {
+    destino: txt(b.destino, 80), ida: vDataOk(b.ida) ? b.ida : null, volta: vDataOk(b.volta) ? b.volta : null,
+    pessoas: Math.min(10, Math.max(1, parseInt(b.pessoas) || 2)), custos,
+    status: ['ideia', 'planejada', 'reservada', 'feita'].includes(b.status) ? b.status : 'ideia',
+    forma: ['dinheiro', 'cartao', 'misto'].includes(b.forma) ? b.forma : 'dinheiro',
+    cartaoId: parseInt(b.cartaoId) || null, parcelas: Math.min(24, Math.max(1, parseInt(b.parcelas) || 1)), notas: txt(b.notas, 600)
+  }
+}
+router.post('/viagem/viagens', (req, res) => {
+  try {
+    const v = lerViagem(req.body)
+    if (!v.destino) return res.status(400).json({ erro: 'Informe o destino' })
+    const id = VDB.salvarViagem(famDoUsuario(req), v)
+    res.json({ id })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.put('/viagem/viagens/:id', (req, res) => {
+  try {
+    const fam = famDoUsuario(req), id = parseInt(req.params.id)
+    if (!VDB.viagem(fam, id)) return res.status(404).json({ erro: 'Viagem não encontrada' })
+    const v = lerViagem(req.body)
+    if (!v.destino) return res.status(400).json({ erro: 'Informe o destino' })
+    VDB.salvarViagem(fam, v, id)
+    res.json({ id })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+router.delete('/viagem/viagens/:id', (req, res) => {
+  try { VDB.delViagem(famDoUsuario(req), parseInt(req.params.id)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+// Cria uma meta de guardar dinheiro para a viagem (aparece na aba Metas).
+router.post('/viagem/viagens/:id/meta', (req, res) => {
+  try {
+    const fam = famDoUsuario(req), id = parseInt(req.params.id)
+    const v = VDB.viagem(fam, id)
+    if (!v) return res.status(404).json({ erro: 'Viagem não encontrada' })
+    let custos = {}
+    try { custos = JSON.parse(v.custos || '{}') } catch (_) {}
+    const total = vg.custosTotal(custos)
+    if (!(total > 0)) return res.status(400).json({ erro: 'Preencha os custos da viagem antes' })
+    const prazo = v.ida ? db.somaDias(v.ida, -7) : null
+    const r = db.criarMeta(`Viagem: ${v.destino}`, total, prazo, 'Guardar para a viagem', 'Lazer', '✈️', fam)
+    VDB.ligarMeta(fam, id, Number(r.lastInsertRowid))
+    res.json({ metaId: Number(r.lastInsertRowid) })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 router.post('/plan/assinaturas/restaurar', (req, res) => {
   try { plan.restaurarIgnoradas(famDoUsuario(req)); res.json({ ok: true }) } catch(e) { res.status(500).json({ erro: e.message }) }
 })

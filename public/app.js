@@ -1187,6 +1187,7 @@ function mostrarAba(nome) {
   if (nome === 'metas') carregarMetas()
   if (nome === 'cartoes') carregarCartoes()
   if (nome === 'contas') carregarContas()
+  if (nome === 'viagens') carregarViagens()
   document.getElementById('app-main').scrollTop = 0
 }
 
@@ -4957,6 +4958,11 @@ async function renderPlanejamento() {
   else if (fech.renda > 0) tiles.push(tile('fechamento', '📊', 'Mês passado', `${fech.resultado >= 0 ? 'Sobrou' : 'Faltou'} ${fmt0(Math.abs(fech.resultado))}`, `${mesNome(fech.mes)} · gastos ${fmt0(fech.gastos)}`, null, fech.resultado >= 0 ? 'pos' : 'neg'))
   else tiles.push(tile('fechamento', '📊', 'Mês passado', `Gastos ${fmt0(fech.gastos)}`, mesNome(fech.mes)))
 
+  tiles.push(`<button class="pl-tile pl-tile-largo" onclick="mostrarAba('viagens'); document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'))">
+      <span class="pl-topo"><span class="pl-ico">✈</span><span class="pl-nome">Viagens</span></span>
+      <span class="pl-valor">Quando e para onde ir</span>
+      <span class="pl-sub">Férias, datas do casal, feriados, sugestões e quanto guardar</span>
+    </button>`)
   el.innerHTML = tiles.join('')
   renderFechamentoCard(fech)
 }
@@ -5355,6 +5361,264 @@ function navPxPessoas(k) {
   if (novo > mesHojeStr()) return
   planejPessoasMes = novo
   renderPxPessoas()
+}
+
+// ══════════════════════════════════════════
+//  VIAGENS — janelas, sugestões da IA e plano de pagamento
+// ══════════════════════════════════════════
+let vgPainel = null, vgJanela = null, vgSug = null, vgPlanoId = null
+const VG_STATUS = { ideia: 'Ideia', planejada: 'Planejada', reservada: 'Reservada', feita: 'Feita' }
+const VG_CUSTOS = [['transporte', 'Transporte'], ['hospedagem', 'Hospedagem'], ['alimentacao', 'Alimentação'], ['passeios', 'Passeios'], ['outros', 'Outros']]
+const VG_ICO = { ferias: '🏖', data: '❤', feriado: '📅' }
+const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
+const dCurta = s => s ? `${Number(s.slice(8, 10))} ${MES_CURTO[Number(s.slice(5, 7)) - 1]}` : ''
+const periodoTxt = (a, b) => a && b ? (a === b ? dCurta(a) : `${dCurta(a)} a ${dCurta(b)}${a.slice(0, 4) !== b.slice(0, 4) || a.slice(0, 4) !== hojeLocalBR().slice(0, 4) ? ' de ' + b.slice(0, 4) : ''}`) : 'sem data'
+const vgTotal = c => VG_CUSTOS.reduce((a, [k]) => a + (Number(c?.[k]) || 0), 0)
+const vgPost = (url, body, method = 'POST') => api(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+
+async function carregarViagens() {
+  try {
+    vgPainel = await api('/viagem/painel')
+    renderViagens()
+  } catch (e) {
+    document.getElementById('vg-janelas').innerHTML = `<div class="orc-vazio">Não foi possível carregar: ${escH(e.message)}</div>`
+  }
+}
+
+function renderViagens() {
+  const p = vgPainel
+  const cap = p.capacidade
+  const livre = cap.cartoes.reduce((a, c) => a + c.livre, 0)
+  document.getElementById('vg-capacidade').innerHTML = `
+    <div class="px-tres">
+      <div><small>Sobra por mês</small><b class="${cap.sobraMensal > 0 ? '' : 'neg'}">${fmt0(cap.sobraMensal)}</b></div>
+      <div><small>Limite livre</small><b>${fmt0(livre)}</b></div>
+      <div><small>Viagens</small><b>${p.viagens.filter(v => v.status !== 'feita').length}</b></div>
+    </div>
+    ${cap.negativo > 0 ? `<p class="px-aviso"><b>A conta está ${fmt0(cap.negativo)} no negativo</b>Viajar com o dinheiro já guardado sai mais barato do que parcelar agora. Use as sugestões para planejar com antecedência.</p>` : ''}`
+
+  document.getElementById('vg-janelas').innerHTML = p.janelas.length ? p.janelas.map((j, i) => `
+    <button class="vg-item" onclick="abrirVgSugestoes(${i})">
+      <span class="px-row-ico vg-ico-${j.tipo}">${VG_ICO[j.tipo] || '📅'}</span>
+      <span class="px-row-txt"><b>${escH(j.titulo)}</b>
+        <small>${periodoTxt(j.inicio, j.fim)} · ${j.dias} dias${j.detalhe ? ' · ' + escH(j.detalhe) : ''}${j.combina.length ? ' · junto com ' + escH(j.combina.join(', ')) : ''}</small></span>
+      <span class="vg-seta">›</span>
+    </button>`).join('') : '<div class="orc-vazio">Cadastre as férias e as datas do casal abaixo.</div>'
+
+  document.getElementById('vg-planos').innerHTML = p.viagens.length ? p.viagens.map(v => `
+    <button class="vg-item" onclick="abrirViagemPlano(${v.id})">
+      <span class="px-row-ico">✈</span>
+      <span class="px-row-txt"><b>${escH(v.destino)}</b>
+        <small>${periodoTxt(v.ida, v.volta)} · ${VG_STATUS[v.status] || 'Ideia'}${v.pagamento.porMes ? ` · guardar ${fmt0(v.pagamento.porMes)}/mês` : ''}</small></span>
+      <span class="px-row-val">${fmt0(v.pagamento.total)}</span>
+    </button>`).join('') : '<div class="orc-vazio">Nenhuma viagem ainda. Escolha uma janela acima para ver sugestões.</div>'
+
+  document.getElementById('vg-destinos').innerHTML = p.destinos.map(d => `<span class="vg-chip">${escH(d.nome)}<button aria-label="Remover ${escH(d.nome)}" onclick="delVg('destinos', ${d.id})">✕</button></span>`).join('')
+    || '<span class="vg-ajuda">Nenhum lugar ainda.</span>'
+
+  document.getElementById('vg-datas').innerHTML = p.datas.map(d => `
+    <div class="px-row"><span class="px-row-ico">❤</span>
+      <span class="px-row-txt"><b>${escH(d.titulo)}</b><small>${d.data.split('-').reverse().join('/')}</small></span>
+      <button class="px-mini" onclick="delVg('datas', ${d.id})">Excluir</button></div>`).join('') || '<div class="vg-ajuda">Ex.: aniversário de casamento, de namoro, aniversário de cada um.</div>'
+
+  document.getElementById('vg-ferias').innerHTML = p.ferias.map(f => `
+    <div class="px-row"><span class="px-row-ico">🏖</span>
+      <span class="px-row-txt"><b>${f.usuario_nome ? escH(f.usuario_nome.split(' ')[0]) : 'Os dois'}</b><small>${f.inicio.split('-').reverse().join('/')} a ${f.fim.split('-').reverse().join('/')}</small></span>
+      <button class="px-mini" onclick="delVg('ferias', ${f.id})">Excluir</button></div>`).join('') || '<div class="vg-ajuda">Coloque as férias previstas de cada um.</div>'
+
+  const sel = document.getElementById('vg-ferias-quem')
+  if (!sel.options.length) {
+    api('/usuarios').then(us => {
+      sel.innerHTML = '<option value="">Os dois</option>' + us.filter(u => u.role !== 'super_admin').map(u => `<option value="${u.id}">${escH(u.nome)}</option>`).join('')
+    }).catch(() => { sel.innerHTML = '<option value="">Os dois</option>' })
+  }
+}
+
+async function addVgDestino() {
+  const el = document.getElementById('vg-destino-nome')
+  if (!el.value.trim()) return
+  try { await vgPost('/viagem/destinos', { nome: el.value.trim() }); el.value = ''; carregarViagens() } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function addVgData() {
+  const t = document.getElementById('vg-data-titulo'), d = document.getElementById('vg-data-data')
+  if (!t.value.trim() || !d.value) { toast('Informe o nome e a data', 'erro'); return }
+  try { await vgPost('/viagem/datas', { titulo: t.value.trim(), data: d.value }); t.value = ''; d.value = ''; carregarViagens() } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function addVgFerias() {
+  const i = document.getElementById('vg-ferias-inicio'), f = document.getElementById('vg-ferias-fim')
+  if (!i.value || !f.value || f.value < i.value) { toast('Informe o início e o fim das férias', 'erro'); return }
+  try {
+    await vgPost('/viagem/ferias', { inicio: i.value, fim: f.value, usuarioId: document.getElementById('vg-ferias-quem').value || null })
+    i.value = ''; f.value = ''; carregarViagens()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function delVg(tipo, id) {
+  if (!confirm('Excluir?')) return
+  try { await api(`/viagem/${tipo}/${id}`, { method: 'DELETE' }); carregarViagens() } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ── Sugestões para uma janela ──
+const vgCorpo = html => { document.getElementById('vgm-corpo').innerHTML = html }
+function abrirVgSugestoes(i) {
+  vgJanela = vgPainel.janelas[i]
+  vgSug = null
+  document.getElementById('vgm-titulo').textContent = vgJanela.titulo
+  vgCorpo(`
+    <p class="px-txt"><b>${periodoTxt(vgJanela.inicio, vgJanela.fim)}</b> · ${vgJanela.dias} dias${vgJanela.detalhe ? `<br><small class="px-nota">${escH(vgJanela.detalhe)}</small>` : ''}</p>
+    <label class="px-label">Algum pedido? (opcional)</label>
+    <input id="vg-foco" class="px-input vg-input-txt" placeholder="Ex.: praia, frio, até R$ 2.000, Gramado" maxlength="80">
+    <button class="btn-confirm btn-verde px-btn" onclick="buscarVgSugestoes(false)">Buscar sugestões</button>
+    <p class="px-nota">A IA pesquisa preços e promoções atuais para essas datas, saindo de Cotia. Leva de 30 segundos a 2 minutos.</p>`)
+  document.getElementById('modal-viagem').style.display = 'flex'
+}
+async function buscarVgSugestoes(forcar) {
+  const foco = (document.getElementById('vg-foco')?.value || vgSug?.foco || '').trim()
+  vgCorpo(`<div class="vg-carregando"><div class="vg-spinner"></div><b>Pesquisando passagens, hospedagens e promoções…</b><span>Isso leva de 30 segundos a 2 minutos. Pode deixar esta tela aberta.</span></div>`)
+  try {
+    const r = await vgPost('/viagem/sugerir', { inicio: vgJanela.inicio, fim: vgJanela.fim, motivo: vgJanela.titulo, foco, forcar })
+    vgSug = { ...r, foco }
+    pintarVgSugestoes()
+  } catch (e) {
+    vgCorpo(`<div class="orc-vazio">${escH(e.message)}</div><button class="btn-confirm btn-verde px-btn" onclick="buscarVgSugestoes(true)">Tentar de novo</button>`)
+  }
+}
+function linksBusca(destino, ida, volta, comoIr) {
+  const d = encodeURIComponent(destino)
+  const links = []
+  if (comoIr === 'aviao') links.push(`<a class="px-mini" target="_blank" rel="noopener" href="https://www.google.com/travel/flights?hl=pt-BR&q=${encodeURIComponent(`Voos de São Paulo para ${destino} ida ${ida} volta ${volta}`)}">Passagens</a>`)
+  links.push(`<a class="px-mini" target="_blank" rel="noopener" href="https://www.airbnb.com.br/s/${d}/homes?checkin=${ida}&checkout=${volta}&adults=2">Airbnb</a>`)
+  links.push(`<a class="px-mini" target="_blank" rel="noopener" href="https://www.booking.com/searchresults.pt-br.html?ss=${d}&checkin=${ida}&checkout=${volta}&group_adults=2&no_rooms=1&group_children=0">Booking</a>`)
+  return links.join('')
+}
+function pintarVgSugestoes() {
+  const s = vgSug, j = vgJanela
+  const quando = s.geradoEm ? new Date(s.geradoEm.replace(' ', 'T') + 'Z').toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+  vgCorpo(`
+    <p class="px-nota">${periodoTxt(j.inicio, j.fim)} · ${j.dias} dias${s.emCache ? ` · pesquisa de ${quando} · <button class="px-link" onclick="buscarVgSugestoes(true)">pesquisar de novo</button>` : ''}</p>
+    ${s.sugestoes.map((x, i) => `
+      <div class="vg-sug">
+        <div class="vg-sug-topo"><div><b>${escH(x.destino)}</b><small>${escH(x.deslocamento || '')}</small></div>
+          <div class="vg-sug-total">${fmt0(x.total)}<small>para 2</small></div></div>
+        <p class="px-txt">${escH(x.porque)}</p>
+        ${x.hospedagem ? `<p class="px-nota">Hospedagem: ${escH(x.hospedagem)}</p>` : ''}
+        <div class="vg-custos">${VG_CUSTOS.map(([k, n]) => x.custos[k] ? `<span>${n} <b>${fmt0(x.custos[k])}</b></span>` : '').join('')}</div>
+        <span class="vg-badge ${x.base_precos === 'pesquisa' ? 'on' : ''}">${x.base_precos === 'pesquisa' ? 'Preços pesquisados agora' : 'Estimativa'}</span>
+        ${x.oportunidade ? `<p class="px-txt vg-oport">${escH(x.oportunidade)}${x.fonte_url ? ` <a target="_blank" rel="noopener" href="${escH(x.fonte_url)}">ver fonte</a>` : ''}</p>` : ''}
+        ${x.dicas.length ? `<ul class="px-lista">${x.dicas.map(d => `<li>${escH(d)}</li>`).join('')}</ul>` : ''}
+        <div class="vg-acoes">${linksBusca(x.destino, j.inicio, j.fim, x.como_ir)}
+          <button class="px-mini on" onclick="salvarVgSugestao(${i})">Salvar como plano</button></div>
+      </div>`).join('')}
+    ${s.observacao ? `<p class="px-txt">${escH(s.observacao)}</p>` : ''}
+    <p class="px-nota">Preços mudam rápido. Confira nos links antes de reservar.</p>
+    ${s.fontes && s.fontes.length ? `<details class="vg-fontes"><summary>Fontes pesquisadas (${s.fontes.length})</summary>${s.fontes.map(f => `<a target="_blank" rel="noopener" href="${escH(f.url)}">${escH(f.titulo)}</a>`).join('')}</details>` : ''}`)
+}
+async function salvarVgSugestao(i) {
+  const x = vgSug.sugestoes[i], j = vgJanela
+  const notas = [x.porque, x.hospedagem ? 'Hospedagem: ' + x.hospedagem : '', x.oportunidade, x.fonte_url].filter(Boolean).join('\n')
+  try {
+    const r = await vgPost('/viagem/viagens', { destino: x.destino, ida: j.inicio, volta: j.fim, custos: x.custos, status: 'ideia', notas })
+    toast('✅ Viagem salva')
+    vgPainel = await api('/viagem/painel')
+    renderViagens()
+    abrirViagemPlano(r.id)
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+
+// ── Plano de uma viagem: custos e como pagar ──
+function abrirViagemPlano(id = null) {
+  const v = id ? vgPainel.viagens.find(x => x.id === id) : null
+  vgPlanoId = v ? v.id : null
+  document.getElementById('vgm-titulo').textContent = v ? v.destino : 'Nova viagem'
+  vgCorpo(`
+    <label class="px-label">Destino</label>
+    <input id="vgp-destino" class="px-input vg-input-txt" maxlength="80" value="${escH(v?.destino || '')}" placeholder="Ex.: Campos do Jordão, SP">
+    <div class="vg-duas">
+      <div><label class="px-label">Ida</label><input id="vgp-ida" class="px-input vg-input-txt" type="date" value="${v?.ida || ''}" onchange="pintarVgPagamento()"></div>
+      <div><label class="px-label">Volta</label><input id="vgp-volta" class="px-input vg-input-txt" type="date" value="${v?.volta || ''}"></div>
+    </div>
+    <label class="px-label">Situação</label>
+    <div class="px-chips px-chips-wrap" id="vgp-status">${Object.entries(VG_STATUS).map(([k, n]) => `<button class="px-chip ${(v?.status || 'ideia') === k ? 'on' : ''}" data-v="${k}" onclick="selVgStatus(this)">${n}</button>`).join('')}</div>
+    <h4 class="px-h">Custos para ${v?.pessoas || 2} pessoas</h4>
+    ${VG_CUSTOS.map(([k, n]) => `<div class="vg-custo-linha"><span>${n}</span><input class="px-input vg-input-txt" inputmode="decimal" data-custo="${k}" value="${v?.custos?.[k] ? fmtNum(v.custos[k]) : ''}" placeholder="R$ 0,00" oninput="pintarVgPagamento()"></div>`).join('')}
+    <div id="vgp-pagamento"></div>
+    <label class="px-label">Anotações</label>
+    <textarea id="vgp-notas" class="px-input vg-input-txt vg-notas" maxlength="600">${escH(v?.notas || '')}</textarea>
+    <button class="btn-confirm btn-verde px-btn" onclick="salvarViagemPlano()">Salvar</button>
+    ${v && !v.meta_id ? `<button class="btn-cancel px-btn" onclick="criarMetaViagem(${v.id})">Criar meta para guardar o dinheiro</button>` : ''}
+    ${v && v.meta_id ? '<p class="px-nota">Há uma meta para esta viagem na aba Metas.</p>' : ''}
+    ${v ? `<button class="px-link vg-excluir" onclick="excluirViagemPlano(${v.id})">Excluir viagem</button>` : ''}`)
+  document.getElementById('modal-viagem').style.display = 'flex'
+  pintarVgPagamento()
+}
+function selVgStatus(btn) {
+  document.querySelectorAll('#vgp-status .px-chip').forEach(b => b.classList.toggle('on', b === btn))
+}
+function lerVgCustos() {
+  const c = {}
+  document.querySelectorAll('[data-custo]').forEach(i => { c[i.dataset.custo] = parseBRL(i.value) || 0 })
+  return c
+}
+function pintarVgPagamento() {
+  const el = document.getElementById('vgp-pagamento')
+  if (!el) return
+  const cap = vgPainel.capacidade
+  const total = vgTotal(lerVgCustos())
+  const ida = document.getElementById('vgp-ida').value
+  const hoje = hojeLocalBR()
+  if (!(total > 0)) { el.innerHTML = '<p class="px-nota">Preencha os custos para ver quanto guardar por mês.</p>'; return }
+  let meses = null
+  if (ida && ida > hoje) {
+    const [hy, hm] = hoje.split('-').map(Number), [iy, im] = ida.split('-').map(Number)
+    meses = Math.max(1, (iy * 12 + im) - (hy * 12 + hm))
+  }
+  const porMes = meses ? total / meses : null
+  const cabe = porMes != null && cap.sobraMensal > 0 && porMes <= cap.sobraMensal
+  const parc = [3, 6, 10]
+  const cartoes = cap.cartoes.filter(c => c.limite > 0)
+  el.innerHTML = `
+    <div class="px-destaque vg-total"><small>Total da viagem</small><b>${fmt(total)}</b></div>
+    <h4 class="px-h">Guardando em dinheiro</h4>
+    ${porMes ? `<div class="px-row"><span class="px-row-txt"><b>${fmt0(porMes)} por mês</b><small>${meses} ${meses === 1 ? 'mês' : 'meses'} até a ida${cabe ? ' · cabe na sobra' : cap.sobraMensal > 0 ? ` · a sobra é ${fmt0(cap.sobraMensal)}` : ''}</small></span>
+      <span class="px-row-val ${cabe ? 'pos' : 'neg'}">${cabe ? 'Cabe' : 'Apertado'}</span></div>`
+      : '<p class="px-nota">Coloque a data de ida para calcular quanto guardar por mês.</p>'}
+    <h4 class="px-h">No cartão</h4>
+    ${cartoes.length ? cartoes.map(c => `<div class="px-row"><span class="px-row-txt"><b>${escH(c.nome)}${vgPainel.viagens && c.usuario_nome ? ' · ' + escH(c.usuario_nome.split(' ')[0]) : ''}</b>
+        <small>${fmt0(c.livre)} livres · ${parc.map(n => `${n}x de ${fmt0(total / n)}`).join(' · ')}</small></span>
+      <span class="px-row-val ${c.livre >= total ? 'pos' : 'neg'}">${c.livre >= total ? 'Cabe' : 'Não cabe'}</span></div>`).join('') : '<p class="px-nota">Nenhum cartão cadastrado.</p>'}
+    <p class="px-nota">Parcelar só faz sentido sem juros e se a parcela couber na sobra de todos os meses até acabar. Juntar antes costuma render desconto à vista.${cap.negativo > 0 ? ' Com a conta no negativo, guardar antes é o caminho mais seguro.' : ''}</p>`
+}
+async function salvarViagemPlano() {
+  const destino = document.getElementById('vgp-destino').value.trim()
+  if (!destino) { toast('Informe o destino', 'erro'); return }
+  const body = {
+    destino, ida: document.getElementById('vgp-ida').value || null, volta: document.getElementById('vgp-volta').value || null,
+    status: document.querySelector('#vgp-status .px-chip.on')?.dataset.v || 'ideia', custos: lerVgCustos(),
+    notas: document.getElementById('vgp-notas').value
+  }
+  try {
+    const r = vgPlanoId ? await vgPost(`/viagem/viagens/${vgPlanoId}`, body, 'PUT') : await vgPost('/viagem/viagens', body)
+    toast('✅ Viagem salva')
+    vgPainel = await api('/viagem/painel')
+    renderViagens()
+    abrirViagemPlano(r.id)
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function criarMetaViagem(id) {
+  try {
+    await vgPost(`/viagem/viagens/${id}/meta`, {})
+    toast('✅ Meta criada na aba Metas')
+    vgPainel = await api('/viagem/painel')
+    renderViagens()
+    abrirViagemPlano(id)
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
+}
+async function excluirViagemPlano(id) {
+  if (!confirm('Excluir esta viagem?')) return
+  try {
+    await api(`/viagem/viagens/${id}`, { method: 'DELETE' })
+    fecharModal('modal-viagem')
+    carregarViagens()
+  } catch (e) { toast('❌ ' + e.message, 'erro') }
 }
 
 // ── START ──

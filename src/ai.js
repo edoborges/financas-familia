@@ -351,4 +351,94 @@ Resumo em 3-4 linhas com emojis, tom animado e uma dica rápida. Máximo 100 pal
   return response.content[0].text
 }
 
-module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario, analisarArquivoFinanceiro, explicarAcao }
+// Sugestões de viagem para um casal saindo de Cotia (SP), com pesquisa na web de preços e
+// promoções atuais. Devolve { sugestoes, observacao, fontes }.
+async function sugerirViagens(ctx) {
+  const R = v => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })
+  const cap = ctx.capacidade || {}
+  const cartoes = (cap.cartoes || []).filter(c => c.livre > 0).map(c => `${c.nome}: ${R(c.livre)} livres`).join('; ') || 'sem limite livre informado'
+  const prompt = `Você ajuda um casal a planejar uma viagem a dois. Responda em português do Brasil.
+
+CONTEXTO
+- Moram em Cotia (SP), Grande São Paulo. Aeroportos: Congonhas (CGH, ~30 km), Guarulhos (GRU, ~60 km), Viracopos (VCP, ~95 km). Têm carro.
+- Janela: de ${ctx.inicio} a ${ctx.fim} (${ctx.noites} noites). Hoje é ${ctx.hoje}.
+- Motivo: ${ctx.motivo || 'descanso a dois'}.
+${ctx.foco ? `- Pedido específico: ${ctx.foco}\n` : ''}- Lugares que eles querem conhecer: ${ctx.destinos.length ? ctx.destinos.join('; ') : 'nenhum informado'}.
+- Orçamento: sobram cerca de ${R(cap.sobraMensal)} por mês${cap.sobraBaseMesAtual ? ' (previsão do mês atual)' : ''}.${cap.negativo > 0 ? ` A conta corrente está ${R(cap.negativo)} no negativo (cheque especial), então o dinheiro está apertado.` : ''} Cartões: ${cartoes}.
+
+TAREFA
+1. Pesquise na web preços atuais para essas datas: passagens saindo de São Paulo, diárias para casal (pousadas, hotéis, Airbnb) e promoções em andamento. Faça poucas buscas e objetivas.
+2. Monte de 3 a 4 sugestões variadas, pensadas para casal:
+   - pelo menos uma perto, de carro (até 3 a 4 horas de Cotia), a mais econômica;
+   - ${ctx.destinos.length ? 'pelo menos uma dos lugares que eles querem conhecer, se couber na janela;' : 'uma de distância média;'}
+   - respeite o número de noites da janela.
+3. Para cada uma, estime o custo total para 2 pessoas, separado em transporte (passagem ou combustível e pedágio ida e volta), hospedagem (todas as noites), alimentação, passeios e outros.
+
+REGRAS
+- Não invente preço. Quando um valor veio da pesquisa, use-o e informe a URL em "fonte_url". Quando for estimativa sua, marque "base_precos": "estimativa".
+- Valores em reais, números sem símbolo.
+- Dado o orçamento, prefira opções econômicas e diga como baratear (ex.: viajar fora do feriado, pousada sem café, ônibus).
+- Não recomende cartão de crédito, empréstimo, produto financeiro nem agência específica. Não faça reservas.
+- Tom simples e direto, sem exagero.
+
+FORMATO
+Responda ao final APENAS com um objeto JSON válido, sem texto antes ou depois, neste formato:
+{"sugestoes":[{"destino":"Cidade, UF","regiao":"","porque":"1-2 frases do porquê é bom para casal nessa época","como_ir":"carro|aviao|onibus","deslocamento":"ex.: 2h30 de carro","hospedagem":"tipo e faixa por noite","noites":0,"custos":{"transporte":0,"hospedagem":0,"alimentacao":0,"passeios":0,"outros":0},"total":0,"base_precos":"pesquisa|estimativa","oportunidade":"promoção ou preço encontrado, curto; vazio se não achou","fonte_url":"","dicas":["dica curta"]}],"observacao":"1 frase sobre o orçamento"}`
+
+  const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 6, user_location: { type: 'approximate', city: 'Cotia', region: 'São Paulo', country: 'BR', timezone: 'America/Sao_Paulo' } }]
+  const messages = [{ role: 'user', content: prompt }]
+  let response
+  // pause_turn: a pesquisa longa pode pausar; continua mandando a resposta de volta.
+  for (let i = 0; i < 4; i++) {
+    response = await client.beta.messages.create({
+      model: 'claude-opus-5-5',
+      max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'medium' },
+      tools,
+      messages
+    })
+    if (response.stop_reason !== 'pause_turn') break
+    messages.push({ role: 'assistant', content: response.content })
+  }
+  if (response.stop_reason === 'refusal') throw new Error('A IA não conseguiu montar sugestões para esse pedido. Tente outra janela ou outro destino.')
+
+  const fontes = new Map()
+  for (const msg of [...messages.filter(m => m.role === 'assistant').map(m => m.content), response.content]) {
+    for (const b of msg) {
+      if (b.type === 'web_search_tool_result' && Array.isArray(b.content)) {
+        for (const r of b.content) if (r.type === 'web_search_result' && r.url) fontes.set(r.url, r.title || r.url)
+      }
+    }
+  }
+  const texto = response.content.filter(b => b.type === 'text').map(b => b.text).join('')
+  const ini = texto.indexOf('{'), fim = texto.lastIndexOf('}')
+  if (ini < 0 || fim < ini) throw new Error('A resposta da IA veio sem sugestões. Tente de novo.')
+  let dados
+  try { dados = JSON.parse(texto.slice(ini, fim + 1)) } catch (_) { throw new Error('A resposta da IA veio num formato inesperado. Tente de novo.') }
+  const num = v => Math.max(0, Math.round(Number(v) || 0))
+  const sugestoes = (Array.isArray(dados.sugestoes) ? dados.sugestoes : []).slice(0, 5).map(s => {
+    const custos = {
+      transporte: num(s.custos?.transporte), hospedagem: num(s.custos?.hospedagem), alimentacao: num(s.custos?.alimentacao),
+      passeios: num(s.custos?.passeios), outros: num(s.custos?.outros)
+    }
+    const url = /^https?:\/\//.test(String(s.fonte_url || '')) ? String(s.fonte_url) : ''
+    return {
+      destino: String(s.destino || '').slice(0, 80), regiao: String(s.regiao || '').slice(0, 60),
+      porque: String(s.porque || '').slice(0, 400), como_ir: ['carro', 'aviao', 'onibus'].includes(s.como_ir) ? s.como_ir : 'carro',
+      deslocamento: String(s.deslocamento || '').slice(0, 80), hospedagem: String(s.hospedagem || '').slice(0, 160),
+      noites: num(s.noites), custos, total: Object.values(custos).reduce((a, v) => a + v, 0),
+      base_precos: s.base_precos === 'pesquisa' ? 'pesquisa' : 'estimativa',
+      oportunidade: String(s.oportunidade || '').slice(0, 300), fonte_url: url,
+      dicas: (Array.isArray(s.dicas) ? s.dicas : []).slice(0, 4).map(d => String(d).slice(0, 200))
+    }
+  }).filter(s => s.destino)
+  if (!sugestoes.length) throw new Error('A IA não encontrou sugestões para essa janela. Tente de novo.')
+  return {
+    sugestoes, observacao: String(dados.observacao || '').slice(0, 300),
+    fontes: [...fontes].slice(0, 12).map(([url, titulo]) => ({ url, titulo: String(titulo).slice(0, 120) }))
+  }
+}
+
+module.exports = { interpretarMensagem, gerarPlanoEconomia, gerarResumoDiario, analisarArquivoFinanceiro, explicarAcao, sugerirViagens }

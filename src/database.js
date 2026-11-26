@@ -1985,8 +1985,85 @@ const planDB = {
     : 0
 }
 
+// ===== VIAGENS =====
+db.exec(`
+  CREATE TABLE IF NOT EXISTS viagem_datas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL,
+    titulo TEXT NOT NULL,
+    data DATE NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS viagem_ferias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL,
+    usuario_id INTEGER,
+    inicio DATE NOT NULL,
+    fim DATE NOT NULL,
+    obs TEXT,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS viagem_destinos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL,
+    nome TEXT NOT NULL,
+    obs TEXT,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS viagens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL,
+    destino TEXT NOT NULL,
+    ida DATE,
+    volta DATE,
+    pessoas INTEGER DEFAULT 2,
+    custos TEXT DEFAULT '{}',
+    status TEXT DEFAULT 'ideia',
+    forma TEXT DEFAULT 'dinheiro',
+    cartao_id INTEGER,
+    parcelas INTEGER DEFAULT 1,
+    meta_id INTEGER,
+    notas TEXT,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS viagem_sugestoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL,
+    chave TEXT NOT NULL,
+    conteudo TEXT NOT NULL,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`)
+// Tudo filtrado pela família: um registro de outra família nunca é lido nem alterado.
+const viagemDB = {
+  datas: fam => db.prepare('SELECT * FROM viagem_datas WHERE familia_id = ? ORDER BY strftime(\'%m-%d\', data)').all(fam),
+  addData: (fam, titulo, data) => db.prepare('INSERT INTO viagem_datas (familia_id, titulo, data) VALUES (?, ?, ?)').run(fam, titulo, data),
+  delData: (fam, id) => db.prepare('DELETE FROM viagem_datas WHERE id = ? AND familia_id = ?').run(id, fam),
+  ferias: fam => db.prepare('SELECT f.*, u.nome AS usuario_nome FROM viagem_ferias f LEFT JOIN usuarios u ON u.id = f.usuario_id WHERE f.familia_id = ? ORDER BY f.inicio').all(fam),
+  addFerias: (fam, usuarioId, inicio, fim, obs) => db.prepare('INSERT INTO viagem_ferias (familia_id, usuario_id, inicio, fim, obs) VALUES (?, ?, ?, ?, ?)').run(fam, usuarioId || null, inicio, fim, obs || null),
+  delFerias: (fam, id) => db.prepare('DELETE FROM viagem_ferias WHERE id = ? AND familia_id = ?').run(id, fam),
+  destinos: fam => db.prepare('SELECT * FROM viagem_destinos WHERE familia_id = ? ORDER BY criado_em').all(fam),
+  addDestino: (fam, nome, obs) => db.prepare('INSERT INTO viagem_destinos (familia_id, nome, obs) VALUES (?, ?, ?)').run(fam, nome, obs || null),
+  delDestino: (fam, id) => db.prepare('DELETE FROM viagem_destinos WHERE id = ? AND familia_id = ?').run(id, fam),
+  viagens: fam => db.prepare('SELECT * FROM viagens WHERE familia_id = ? ORDER BY COALESCE(ida, \'9999\'), criado_em').all(fam),
+  viagem: (fam, id) => db.prepare('SELECT * FROM viagens WHERE id = ? AND familia_id = ?').get(id, fam),
+  salvarViagem: (fam, v, id = null) => {
+    const campos = [v.destino, v.ida || null, v.volta || null, v.pessoas || 2, JSON.stringify(v.custos || {}), v.status || 'ideia',
+      v.forma || 'dinheiro', v.cartaoId || null, v.parcelas || 1, v.notas || null]
+    if (id) {
+      db.prepare('UPDATE viagens SET destino=?, ida=?, volta=?, pessoas=?, custos=?, status=?, forma=?, cartao_id=?, parcelas=?, notas=? WHERE id = ? AND familia_id = ?').run(...campos, id, fam)
+      return id
+    }
+    return Number(db.prepare('INSERT INTO viagens (destino, ida, volta, pessoas, custos, status, forma, cartao_id, parcelas, notas, familia_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(...campos, fam).lastInsertRowid)
+  },
+  ligarMeta: (fam, id, metaId) => db.prepare('UPDATE viagens SET meta_id = ? WHERE id = ? AND familia_id = ?').run(metaId, id, fam),
+  delViagem: (fam, id) => db.prepare('DELETE FROM viagens WHERE id = ? AND familia_id = ?').run(id, fam),
+  sugestao: (fam, chave, desde) => db.prepare('SELECT * FROM viagem_sugestoes WHERE familia_id = ? AND chave = ? AND criado_em >= ? ORDER BY id DESC LIMIT 1').get(fam, chave, desde),
+  salvarSugestao: (fam, chave, conteudo) => db.prepare('INSERT INTO viagem_sugestoes (familia_id, chave, conteudo) VALUES (?, ?, ?)').run(fam, chave, conteudo)
+}
+
 module.exports = {
-  planDB,
+  planDB, viagemDB,
   enriquecerCartoes, investDB, ofDB,
   registrarTransferencia, desfazerTransferencia, listarTransferencias,
   livreParaGastar, gerarBackup, zerarNumerosFamilia, registrarCreditoFatura, removerCreditoFatura,
