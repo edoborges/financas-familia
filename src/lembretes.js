@@ -180,7 +180,7 @@ async function verificarFechamento(usuarioId, hoje) {
   const u = db.obterUsuarioPorId(usuarioId)
   if (!u) return 0
   const f = plan.fechamento(Number(u.familia_id) || null, null, mesAnt)
-  if (!f.temDados) { db.registrarNotificacao(usuarioId, chave, 'mes'); return 0 }
+  if (!f.temDados || f.incompleto) { db.registrarNotificacao(usuarioId, chave, 'mes'); return 0 }
   const nomes = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
   const nomeMes = nomes[Number(mesAnt.slice(5, 7)) - 1]
   const dif = f.gastos - f.gastosAnterior

@@ -43,6 +43,15 @@ function totaisPorMes(fam, usu, de, ate) {
 }
 const somaCats = cats => Object.values(cats || {}).reduce((a, v) => a + v, 0)
 
+// Mês com dados confiáveis: não é de antes de a família começar a usar o app e tem
+// gastos que fazem sentido perto da renda (menos de 15% = quase nada foi lançado).
+function mesValido(mes, gastos, renda) {
+  const desde = db.obterConfig('pagamentos_desde')
+  if (desde && mes < desde.slice(0, 7)) return false
+  if (renda > 0 && gastos < renda * 0.15) return false
+  return gastos > 0
+}
+
 // ── Fechamento de um mês (padrão: o mês passado) ──
 function fechamento(fam, usu, mes = null) {
   const alvo = /^\d{4}-\d{2}$/.test(mes || '') ? mes : somaMes(mesAtual(), -1)
@@ -67,6 +76,7 @@ function fechamento(fam, usu, mes = null) {
   return {
     mes: alvo, mesAnterior: ant, renda, gastos, gastosAnterior,
     resultado: r2(renda - gastos), temDados: gastos > 0,
+    incompleto: gastos > 0 && alvo < mesAtual() && !mesValido(alvo, gastos, renda),
     subiram, cairam, maiores
   }
 }
@@ -75,9 +85,14 @@ function fechamento(fam, usu, mes = null) {
 const chaveReserva = (fam, usu) => `reserva_meses:${fam || 0}:${usu || 'familia'}`
 function reserva(fam, usu) {
   const atual = mesAtual()
-  const de = somaMes(atual, -3), ate = somaMes(atual, -1)
-  const { porMes, receitas } = totaisPorMes(fam, usu, de, ate)
-  const meses = [de, somaMes(atual, -2), ate].filter(m => porMes[m])
+  const de = somaMes(atual, -3)
+  const { porMes, receitas } = totaisPorMes(fam, usu, de, atual)
+  const rendaM = m => rendaDoMes(fam, usu, m, receitas[m])
+  let meses = [de, somaMes(atual, -2), somaMes(atual, -1)]
+    .filter(m => porMes[m] && mesValido(m, somaCats(porMes[m]), rendaM(m)))
+  // Sem mês fechado confiável (família começou agora): usa o mês atual até aqui.
+  const baseMesAtual = !meses.length && !!porMes[atual]
+  if (baseMesAtual) meses = [atual]
   const n = meses.length
 
   const media = cat => n ? meses.reduce((a, m) => a + (porMes[m][cat] || 0), 0) / n : 0
@@ -96,12 +111,21 @@ function reserva(fam, usu) {
   const falta = r2(Math.max(0, alvo - guardado))
 
   // Quanto sobrou por mês, em média, nos meses fechados.
-  const sobras = meses.map(m => rendaDoMes(fam, usu, m, receitas[m]) - somaCats(porMes[m]))
+  const sobras = meses.map(m => rendaM(m) - somaCats(porMes[m]))
   const sobraMedia = n ? r2(sobras.reduce((a, v) => a + v, 0) / n) : 0
   const mesesParaChegar = falta > 0 && sobraMedia > 0 ? Math.ceil(falta / sobraMedia) : null
 
+  // Conta negativa (cheque especial) vem antes da reserva.
+  const negativo = r2(db.listarContas(fam, usu).reduce((a, c) => a + Math.min(0, Number(c.saldo) || 0), 0) * -1)
+  // Dívidas que acabam nos próximos 6 meses: a parcela delas pode virar reserva.
+  const acabando = db.custoDividas(fam, usu)
+    .filter(d => d.parcelas_restantes > 0 && d.parcelas_restantes <= 6 && d.parcela_mensal > 0)
+    .map(d => ({ descricao: d.descricao, credor: d.credor, parcela: r2(d.parcela_mensal), meses: d.parcelas_restantes }))
+    .sort((a, b) => a.meses - b.meses)
+
   return {
-    temDados: n > 0, mesesUsados: n, custoMensal, essenciais, financiamento: r2(financiamento),
+    temDados: n > 0, mesesUsados: n, baseMesAtual, negativo, acabando,
+    custoMensal, essenciais, financiamento: r2(financiamento),
     metaMeses, alvo, guardado, falta, pct: alvo > 0 ? Math.min(100, Math.round((guardado / alvo) * 100)) : 0,
     mesesCobertos: custoMensal > 0 ? Math.round((guardado / custoMensal) * 10) / 10 : 0,
     sobraMedia, mesesParaChegar, temItemReserva: itensReserva.length > 0

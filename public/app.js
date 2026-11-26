@@ -4922,7 +4922,8 @@ async function renderPlanejamento() {
   // Reserva
   if (!res || !res.temDados) tiles.push(tile('reserva', '🛟', 'Reserva', '—', 'Precisa de um mês fechado com gastos'))
   else if (res.falta <= 0 && res.alvo > 0) tiles.push(tile('reserva', '🛟', 'Reserva', 'Completa', `${num1(res.mesesCobertos)} meses do básico`, 100, 'pos'))
-  else tiles.push(tile('reserva', '🛟', 'Reserva', `${num1(res.mesesCobertos)} de ${res.metaMeses} meses`, `Faltam ${fmt0(res.falta)}`, res.pct))
+  else tiles.push(tile('reserva', '🛟', 'Reserva', `${num1(res.mesesCobertos)} de ${res.metaMeses} meses`,
+    res.negativo > 0 ? `<b class="pl-alerta">Antes: cobrir o negativo</b>` : `Faltam ${fmt0(res.falta)}`, res.pct))
   // Mesada
   const minha = (mesadas || []).find(m => m.minha)
   if (!minha || !minha.configurada) tiles.push(tile('mesada', '👛', 'Minha mesada', 'Definir', 'Um valor livre por mês'))
@@ -4930,14 +4931,18 @@ async function renderPlanejamento() {
   // Cobranças que se repetem
   if (!ass || !ass.achadas.length) tiles.push(tile('assinaturas', '🔁', 'Cobranças fixas', 'Nada novo', 'Nenhuma cobrança repetida'))
   else tiles.push(tile('assinaturas', '🔁', 'Cobranças fixas', `${fmt0(ass.totalAchadasAno)}/ano`,
-    ass.paraRevisar ? `<b class="pl-alerta">${ass.paraRevisar} para revisar</b>` : `${ass.achadas.length} repetidas, revisadas`))
+    ass.paraRevisar ? `<b class="pl-alerta">${ass.paraRevisar} para revisar</b>` : (ass.achadas.length === 1 ? '1 repetida, revisada' : `${ass.achadas.length} repetidas, revisadas`)))
   // Dívidas
   if (!div || !div.length) tiles.push(tile('dividas', '💸', 'Saída das dívidas', 'Sem dívidas', 'Nenhuma ativa', null, 'pos'))
   else {
     const plano = simularDividas(div, 0, true)
+    const base = simularDividas(div, 0, false)
     const saldo = div.reduce((a, d) => a + d.saldo, 0)
+    const sub = base.meses != null && base.meses !== plano.meses
+      ? `no plano · só parcelas: ${mesCurto(somaMesStr(mesHojeStr(), base.meses))}`
+      : `${div.length} dívida${div.length > 1 ? 's' : ''} · ${fmt0(saldo)}`
     tiles.push(plano.meses != null
-      ? tile('dividas', '💸', 'Saída das dívidas', `Livres em ${mesCurto(somaMesStr(mesHojeStr(), plano.meses))}`, `${div.length} dívida${div.length > 1 ? 's' : ''} · ${fmt0(saldo)}`)
+      ? tile('dividas', '💸', 'Saída das dívidas', `Livres em ${mesCurto(somaMesStr(mesHojeStr(), plano.meses))}`, sub)
       : tile('dividas', '💸', 'Saída das dívidas', fmt0(saldo), 'Toque para ver a ordem'))
   }
   // Quem gastou (sempre da família)
@@ -4948,6 +4953,7 @@ async function renderPlanejamento() {
   }
   // Mês passado
   if (!fech || !fech.temDados) tiles.push(tile('fechamento', '📊', 'Mês passado', '—', 'Sem lançamentos'))
+  else if (fech.incompleto) tiles.push(tile('fechamento', '📊', 'Mês passado', 'Poucos lançamentos', `${mesNome(fech.mes)} foi antes do app`))
   else if (fech.renda > 0) tiles.push(tile('fechamento', '📊', 'Mês passado', `${fech.resultado >= 0 ? 'Sobrou' : 'Faltou'} ${fmt0(Math.abs(fech.resultado))}`, `${mesNome(fech.mes)} · gastos ${fmt0(fech.gastos)}`, null, fech.resultado >= 0 ? 'pos' : 'neg'))
   else tiles.push(tile('fechamento', '📊', 'Mês passado', `Gastos ${fmt0(fech.gastos)}`, mesNome(fech.mes)))
 
@@ -4962,7 +4968,7 @@ function renderFechamentoCard(f) {
   const chave = 'fin_fech_visto_' + (usuario?.id || 'x') + '_' + (f?.mes || '')
   let visto = false
   try { visto = localStorage.getItem(chave) === '1' } catch (e) {}
-  if (!f || !f.temDados || Number(hojeLocalBR().slice(8, 10)) > 10 || visto) { el.style.display = 'none'; return }
+  if (!f || !f.temDados || f.incompleto || Number(hojeLocalBR().slice(8, 10)) > 10 || visto) { el.style.display = 'none'; return }
   const dif = f.gastos - f.gastosAnterior
   const comp = f.gastosAnterior > 0 ? ` · ${dif >= 0 ? fmt0(dif) + ' a mais' : fmt0(-dif) + ' a menos'} que ${mesNome(f.mesAnterior).toLowerCase()}` : ''
   const sobra = f.renda > 0 ? (f.resultado >= 0 ? `sobraram <b class="pos">${fmt0(f.resultado)}</b>` : `faltaram <b class="neg">${fmt0(-f.resultado)}</b>`) : ''
@@ -5020,6 +5026,7 @@ async function renderPxFechamento() {
         <b>${mesAno(planejMes)}${atual ? ' <small>(em andamento)</small>' : ''}</b>
         <button onclick="navPxFechamento(1)" ${atual ? 'disabled' : ''} aria-label="Próximo mês">›</button>
       </div>
+      ${f.incompleto ? `<p class="px-aviso">Este mês tem poucos lançamentos (foi antes de vocês começarem a usar o app), então a sobra não é real. Os números valem a partir do primeiro mês completo.</p>` : ''}
       ${!f.temDados ? '<div class="orc-vazio">Nenhum gasto lançado neste mês.</div>' : `
       <div class="px-tres">
         <div><small>Entradas</small><b>${fmt0(f.renda)}</b></div>
@@ -5053,11 +5060,49 @@ function pintarPxReserva(r) {
     return
   }
   const quem = visaoAtual === 'pessoal' ? 'do seu custo básico' : 'do custo básico de vocês'
-  const quando = r.mesesParaChegar ? mesCurto(somaMesStr(mesHojeStr(), r.mesesParaChegar)) : null
-  let tempo
-  if (r.falta <= 0) tempo = `<p class="px-txt">A reserva está completa. O que sobrar daqui para frente pode ir para outros objetivos.</p>`
-  else if (r.mesesParaChegar) tempo = `<p class="px-txt">Nos últimos meses sobraram em média <b>${fmt0(r.sobraMedia)}</b> por mês. Guardando tudo isso, a reserva fica completa em <b>${r.mesesParaChegar} ${r.mesesParaChegar === 1 ? 'mês' : 'meses'}</b> (${quando}). Guardando metade, em ${r.mesesParaChegar * 2} meses.</p>`
-  else tempo = `<p class="px-txt">Nos últimos meses não sobrou dinheiro no fim do mês. Um começo possível é separar um valor fixo pequeno logo que o dinheiro entra, antes dos outros gastos.</p>`
+  const hoje = mesHojeStr()
+  const periodo = r.baseMesAtual ? 'Neste mês, até agora,' : r.mesesUsados === 1 ? 'No último mês' : `Nos últimos ${r.mesesUsados} meses`
+  const sobraTxt = r.baseMesAtual
+    ? (r.sobraMedia > 0 ? `Pela previsão deste mês (entradas menos gastos), devem sobrar <b>${fmt0(r.sobraMedia)}</b>.` : 'Pela previsão deste mês, não vai sobrar dinheiro.')
+    : r.sobraMedia > 0
+      ? `${periodo} sobraram em média <b>${fmt0(r.sobraMedia)}</b> por mês.`
+      : `${periodo} não sobrou dinheiro no fim do mês.`
+
+  // Antes da reserva: conta no negativo.
+  const negativo = r.negativo > 0 ? `
+    <div class="px-aviso"><b>Antes de guardar: ${fmt0(r.negativo)} no negativo</b>
+      O cheque especial pode cobrar até 8% ao mês, e uma aplicação segura rende perto de 1% ao mês. Enquanto a conta estiver negativa, cada real que sobra vale mais cobrindo o negativo do que guardado. A reserva começa depois disso.</div>` : ''
+
+  // Quanto guardar: três ritmos, marcando os que cabem na sobra.
+  let quanto
+  if (r.falta <= 0) {
+    quanto = `<p class="px-txt">A reserva está completa. O que sobrar daqui para frente pode ir para outros objetivos.</p>`
+  } else {
+    const etapa1 = r.guardado < r.custoMensal ? `<p class="px-txt"><b>Primeira etapa:</b> juntar 1 mês do custo básico, <b>${fmt0(r.custoMensal)}</b>. Isso já cobre um imprevisto grande sem recorrer a empréstimo.</p>` : ''
+    const ritmos = [12, 24, 36].map(n => {
+      const v = r.falta / n
+      const cabe = r.sobraMedia > 0 && v <= r.sobraMedia
+      return `<div class="px-row"><span class="px-row-txt"><b>Completa em ${n} meses</b><small>${mesCurto(somaMesStr(hoje, n))}${cabe ? ' · cabe na sobra atual' : ''}</small></span>
+        <span class="px-row-val ${cabe ? 'pos' : ''}">${fmt0(v)}<small>por mês</small></span></div>`
+    }).join('')
+    const acabando = (r.acabando || []).map(d => `<p class="px-txt">Em <b>${mesCurto(somaMesStr(hoje, d.meses))}</b> termina ${escH(d.descricao)} (${escH(d.credor)}): a parcela de <b>${fmt0(d.parcela)}</b> pode passar a ir para a reserva, sem apertar mais o orçamento.</p>`).join('')
+    quanto = `${etapa1}<p class="px-txt">${sobraTxt}</p>${ritmos}${acabando}
+      <p class="px-nota">Guardar logo que o dinheiro entra, como se fosse uma conta a pagar, funciona melhor do que guardar o que sobra no fim do mês.</p>`
+  }
+
+  const onde = `
+    <h4 class="px-h">Onde guardar</h4>
+    <p class="px-txt">A reserva precisa de quatro coisas:</p>
+    <ul class="px-lista">
+      <li><b>Resgate rápido:</b> no mesmo dia ou no dia seguinte (liquidez diária).</li>
+      <li><b>Risco muito baixo:</b> título do Tesouro ou aplicação coberta pelo FGC (até R$ 250 mil por pessoa em cada instituição).</li>
+      <li><b>Render perto de 100% do CDI</b>, para não perder para a inflação.</li>
+      <li><b>Ficar separada</b> da conta do dia a dia, para não ser gasta sem querer.</li>
+    </ul>
+    <p class="px-txt">O que costuma cumprir isso: Tesouro Selic, CDB com liquidez diária que pague 100% do CDI ou mais, e contas ou "caixinhas" de banco que rendem 100% do CDI.</p>
+    <p class="px-txt">Não servem para reserva: ações, fundos imobiliários, dólar e cripto (o valor oscila e pode estar baixo justo quando precisar), previdência e aplicações com carência. A poupança é segura, mas costuma render menos que as opções acima.</p>
+    <p class="px-nota">Isto é a regra geral, não uma indicação de produto. Para escolher o produto e a instituição, um planejador financeiro com certificação CFP pode ajudar.</p>`
+
   pxCorpo(`
     <div class="px-destaque">
       <small>Guardado</small><b>${fmt0(r.guardado)}</b>
@@ -5068,12 +5113,14 @@ function pintarPxReserva(r) {
       ${[3, 6, 12].map(n => `<button class="px-chip ${r.metaMeses === n ? 'on' : ''}" onclick="salvarMetaReservaPx(${n})">${n} meses</button>`).join('')}
     </div>
     <p class="px-txt">Hoje a reserva cobre <b>${num1(r.mesesCobertos)} ${r.mesesCobertos === 1 ? 'mês' : 'meses'}</b> ${quem}.</p>
+    ${negativo}
+    <h4 class="px-h">Quanto guardar por mês</h4>
+    ${quanto}
     <h4 class="px-h">Custo básico por mês: ${fmt(r.custoMensal)}</h4>
     ${r.essenciais.map(c => `<div class="px-row"><span class="px-row-ico">${catIco(c.categoria)}</span><span class="px-row-txt"><b>${escH(c.categoria)}</b></span><span class="px-row-val">${fmt0(c.media)}</span></div>`).join('')}
     ${r.financiamento > 0 ? `<div class="px-row"><span class="px-row-ico">🏦</span><span class="px-row-txt"><b>Parcelas de dívidas</b></span><span class="px-row-val">${fmt0(r.financiamento)}</span></div>` : ''}
-    <p class="px-nota">Média dos últimos ${r.mesesUsados} ${r.mesesUsados === 1 ? 'mês fechado' : 'meses fechados'}, só com o que continua existindo se a renda parar: casa, mercado, saúde, transporte, educação e parcelas. Lazer, restaurante e assinaturas ficam de fora.</p>
-    <h4 class="px-h">Em quanto tempo</h4>
-    ${tempo}
+    <p class="px-nota">${r.baseMesAtual ? 'Calculado com o mês atual até agora (ainda não há mês completo no app); fica mais preciso a cada mês fechado.' : `Média dos últimos ${r.mesesUsados} ${r.mesesUsados === 1 ? 'mês fechado' : 'meses fechados'}.`} Conta só o que continua existindo se a renda parar: casa, mercado, saúde, transporte, educação e parcelas. Lazer, restaurante e assinaturas ficam de fora.</p>
+    ${onde}
     <button class="btn-confirm btn-verde px-btn" onclick="${r.temItemReserva ? 'irParaPatrimonio()' : 'novaReservaPatrimonio()'}">${r.temItemReserva ? 'Atualizar o valor guardado' : 'Cadastrar onde está a reserva'}</button>`)
 }
 async function salvarMetaReservaPx(n) {

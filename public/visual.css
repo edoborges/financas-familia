@@ -560,3 +560,7 @@ select{font-family:var(--fonte)}
 .px-pessoa-topo span{font-family:var(--fonte-num);font-weight:600}
 .px-pessoa .px-row-ico{background:var(--branco)}
 .px-pessoa .px-row{border-bottom:none}
+.px-aviso{background:var(--ambar-claro);border-radius:12px;padding:12px 14px;font-size:.84rem;line-height:1.5;margin:10px 0;color:var(--tinta)}
+.px-aviso b{display:block;margin-bottom:3px;color:var(--ambar)}
+.px-lista{margin:0 0 6px;padding-left:18px;font-size:.86rem;line-height:1.55}
+.px-lista li{margin-bottom:4px}
